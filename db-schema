@@ -1,0 +1,34 @@
+{:db-port 3306
+ :db-user "root"
+ :loading :usage
+ :tables #{{:name :student
+	    :schema {:name "varchar(64)"}
+	    :relations {:one-to-many [:course]
+		       :one-to-one  [:address]}}
+	   {:name :course
+	    :schema {:name "varchar(32)"
+		     :completed "bool"}
+	    :relations {:one-to-many [:material]}}
+	   {:name :address
+	    :schema {:number "int(11)"
+		     :street "varchar(128)"
+		     :city "varchar(64)"
+		     :province "varchar(64)"
+		     :postal_code "varchar(8)"
+		     :country "varchar(32)"}}
+	   {:name :university
+	    :schema {:name "varchar(64)"
+		     :founded "date"}
+	    :relations {:one-to-many [:faculty]
+		       :one-to-one  [:address]}}
+	   {:name :degree
+	    :schema {:name "varchar(64)"}
+	    :relations {:one-to-many [:course]
+		       :one-to-one  [:faculty]}}
+	   {:name :faculty
+	    :schema {:name "varchar(128)"
+		     :dean "varchar(64)"}
+	    :relations {:one-to-many [:degree]}}
+	   {:name :material
+	    :schema {:name "varchar(128)"
+		     :due "datetime"}}}}
