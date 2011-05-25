@@ -281,8 +281,5 @@
       (if (nil? schema-file)
 	(println "Slurm command-line utility used to verify and initialize schema definition.\nUsage: java -jar slurm.jar <schema-filename>")
 	(let [db (SlurmDB. (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e)))))
-	      fetch-req (DBClause. :student :name := "Test Student")
 	      new-row (DBConstruct. :student {:name "Test Student"})]
-	  (.update db (into (.create db new-thing) {:columns {:name "Changed Name"}}))
-	  (println (.field (.create db new-thing) :name))
-	  (println (.fetch db fetch-req)))))))
+	  (.create db new-row))))))
