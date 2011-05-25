@@ -1,12 +1,14 @@
 NOTE: Slurm is in ongoing development, many of the features described aren't yet implemented, Slurm is not yet ready for production.  However, I appreciate all feedback, ideas, and patches.
 
 Slurm is a clojure ORM, with some interesting features:
-- Eager or lazy loading of database objects
-- Loading of database object based on a graph of read/write usage history (smart loading)
-- Simple to define schemas, makes for easy adoption on existing projects
-- Very expressive DB interface (CRUD and direct access if needed)
+- Eager or lazy loading (selectable) of database objects
+- Loading of database objects based on a graph of read/write usage history (smart loading)
+- Seamless single and multi object relations
+- Multiple DB connections with different initialization parameters can be maintained
+- Simple to define schemas, makes for easy adoption on existing projects/DBs
+- Simple and expressive DB interface (CRUD and direct access if needed)
 - Sequence processing of database records
-- Extensive schema verification, ensuring that updates/changes to either the slurm schema or database schema don't fail silently
+- Extensive schema verification and logging, ensuring that updates/changes to either the slurm schema or database schema don't fail silently
 - Support for server pools, allowing seamless scaling and optimization of schemas if needed
 
 Slurm is in active development, and changing often.  Again, not recommended for production environments -- yet.
