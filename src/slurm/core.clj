@@ -2,15 +2,17 @@
   (:gen-class)
   (:require [clojure.contrib.sql :as sql]
 	    [clojure.contrib.string :as str-tools])
-  (:use [slurm.error]
-	[clojure.contrib.error-kit]
+  (:use [clojure.contrib.error-kit]
+	[slurm.error]
 	[slurm.util]))
 
 ;; DB Access Objects
 (defprotocol IDBInfo
   "General info on the DBConnection, common data requests on schema and objects"
+  (get-table-names            [#^DBConnection db-connection])
   (get-table-primary-key      [#^DBConnection db-connection table-name])
   (get-table-primary-key-type [#^DBConnection db-connection table-name])
+  (get-table-fields           [#^DBConnection db-connection table-name])
   (get-table-one-relations    [#^DBConnection db-connection table-name])
   (get-table-many-relations   [#^DBConnection db-connection table-name])
   (get-field-load             [#^DBConnection db-connection table-name field-name]))
@@ -18,11 +20,27 @@
 ;; TODO: fill these in, will save tonnes of boilerplate!
 (defrecord DBConnection [spec schema load-graph]
   IDBInfo
-  (get-table-primary-key      [_ table-name] ())
-  (get-table-primary-key-type [_ table-name] ())
-  (get-table-one-relations    [_ table-name] ())
-  (get-table-many-relations   [_ table-name] ())
-  (get-field-load             [_ table-name field-name] ()))
+  (get-table-names            [_]
+			      (map #(str/as-str (:name %)) (:tables schema)))
+  (get-table-primary-key      [_ table-name]
+			      (or (:primary-key (filter #(= (keyword table-name) (keyword (:name %)))
+							(:tables schema)))
+				  "id"))
+  (get-table-primary-key-type [_ table-name]
+			      (or (:primary-key-type (filter #(= (keyword table-name) (keyword (:name %)))
+							     (:tables schema)))
+				  "int(11)"))
+  (get-table-fields           [_ table-name]
+			      (:schema (filter #(= (keyword table-name) (keyword (:name %)))
+					       (:tables schema))))
+  (get-table-one-relations    [_ table-name]
+			      (:one-to-one (:relations (filter #(= (keyword table-name) (keyword (:name %)))
+							       (:tables schema)))))
+  (get-table-many-relations   [_ table-name]
+			      (:one-to-many (:relations (filter #(= (keyword table-name) (keyword (:name %)))
+								(:tables schema)))))
+  (get-field-load             [_ table-name field-name]
+			      nil))
 
 (defprotocol IDBField
   "Simple accessor for DBObjects, returns a column or relation object (loads if applicable/needed), and manages the access graph"
@@ -30,7 +48,7 @@
 
 (defrecord DBObject [table-name primary-key columns]
   IDBField
-  (field [_ column-name] (get columns column-name))) ;; TODO: lazies should return a clause, then load and return result
+  (field [_ column-name] (get columns column-name))) ;; TODO: lazies should return a clause, then load and return result on fetch
 
 (defrecord DBConstruct [table-name columns])
 
@@ -38,7 +56,7 @@
 
 ;; Record Operations
 ;; TODO: recursively insert relations, adding the returned DBObject to the parent relation key
-(defn- insert-record [db-connection-spec table-name record]
+(defn- insert-db-record [db-connection-spec table-name record]
   (sql/with-connection db-connection-spec
     (sql/transaction
      (sql/insert-records
@@ -49,7 +67,7 @@
 	 [request]
 	 (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record))))))) ;; TODO: kill PK in column struct
 
-(defn- select-record [db-connection-spec table-name table-primary-key column-name column-type operator value]
+(defn- select-db-record [db-connection-spec table-name table-primary-key column-name column-type operator value]
   (let [table-name (name table-name)
 	table-primary-key (name table-primary-key)
 	column-name (name column-name)
@@ -60,7 +78,7 @@
 	escaped-value (if column-type-is-string
 			(str "\"" value "\"")
 			value)
-	request (str "SELECT * FROM " table-name " WHERE " column-name " " operator " " escaped-value)]
+	request (str "SELECT * FROM " table-name " WHERE " column-name " " operator " " escaped-value)] ;; TODO: Create a helper to sanitize clauses
     (do
       (sql/with-connection db-connection-spec
 	(sql/with-query-results query-results
@@ -70,7 +88,7 @@
 			 columns (dissoc (into {} result) (keyword table-primary-key))]
 		     (DBObject. (keyword table-name) primary-key columns)))))))))
 
-(defn- update-record [db-connection-spec table-name primary-key primary-key-type primary-key-value columns]
+(defn- update-db-record [db-connection-spec table-name primary-key primary-key-type primary-key-value columns]
   (let [table-name (name table-name)
 	primary-key (name primary-key)
 	primary-key-type (name primary-key-type)
@@ -88,7 +106,7 @@
       (sql/do-commands request)))) ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
 
 ;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
-(defn- delete-record [db-connection-spec table-name primary-key primary-key-type primary-key-value]
+(defn- delete-db-record [db-connection-spec table-name primary-key primary-key-type primary-key-value]
   (let [table-name (name table-name)
 	primary-key (name primary-key)
 	primary-key-type (name primary-key-type)
@@ -115,7 +133,7 @@
 	  (let [db-connection-spec (:spec db-connection)
 		table-name (name (:table-name object))
 		columns (:columns object)]
-	    (insert-record db-connection-spec table-name columns)))
+	    (insert-db-record db-connection-spec table-name columns)))
   (fetch  [_ clause]
 	  (let [db-connection-spec (:spec db-connection)
 		db-schema (:schema db-connection)
@@ -127,7 +145,7 @@
 		column-type (name (get (:schema table-def) (keyword column-name) "int(11)"))
 		operator (name (or (:operator clause) :=))
 		value (:value clause)]
-	    (select-record db-connection-spec table-name table-primary-key column-name column-type operator value)))
+	    (select-db-record db-connection-spec table-name table-primary-key column-name column-type operator value)))
   (update [_ object]
 	  (let [db-connection-spec (:spec db-connection)
 		db-schema (:schema db-connection)
@@ -138,7 +156,7 @@
 		table-primary-key-type (get table-def :primary-key-type "int(11)")
 		primary-key-value (:primary-key object)
 		columns (:columns object)]
-	    (update-record db-connection-spec table-name table-primary-key table-primary-key-type primary-key-value columns)))
+	    (update-db-record db-connection-spec table-name table-primary-key table-primary-key-type primary-key-value columns)))
   (delete [_ object]
 	  (let [db-connection-spec (:spec db-connection)
 		db-schema (:schema db-connection)
@@ -148,7 +166,7 @@
 		table-primary-key (get table-def :primary-key :id)
 		table-primary-key-type (get table-def :primary-key-type "int(11)")
 		object-primary-key-value (get (:columns object) (keyword table-primary-key))]
-	    (delete-record db-connection-spec table-name table-primary-key table-primary-key-type object-primary-key-value))))
+	    (delete-db-record db-connection-spec table-name table-primary-key table-primary-key-type object-primary-key-value))))
 
 ;; DB Interface (direct access)
 (defprotocol IDBAccess
