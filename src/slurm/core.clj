@@ -10,37 +10,37 @@
 (defprotocol IDBInfo
   "General info on the DBConnection, common data requests on schema and objects"
   (get-table-names            [#^DBConnection db-connection])
+  (get-table                  [#^DBConnection db-connection table-name])
   (get-table-primary-key      [#^DBConnection db-connection table-name])
   (get-table-primary-key-type [#^DBConnection db-connection table-name])
+  (get-table-primary-key-auto [#^DBConnection db-connection table-name])
   (get-table-fields           [#^DBConnection db-connection table-name])
   (get-table-one-relations    [#^DBConnection db-connection table-name])
   (get-table-many-relations   [#^DBConnection db-connection table-name])
   (get-field-load             [#^DBConnection db-connection table-name field-name]))
 
-;; TODO: fill these in, will save tonnes of boilerplate!
+;; Functions for returning common introspection data on schema and load-graph
 (defrecord DBConnection [spec schema load-graph]
   IDBInfo
   (get-table-names            [_]
-			      (map #(str/as-str (:name %)) (:tables schema)))
-  (get-table-primary-key      [_ table-name]
-			      (or (:primary-key (filter #(= (keyword table-name) (keyword (:name %)))
-							(:tables schema)))
-				  "id"))
-  (get-table-primary-key-type [_ table-name]
-			      (or (:primary-key-type (filter #(= (keyword table-name) (keyword (:name %)))
-							     (:tables schema)))
-				  "int(11)"))
-  (get-table-fields           [_ table-name]
-			      (:schema (filter #(= (keyword table-name) (keyword (:name %)))
-					       (:tables schema))))
-  (get-table-one-relations    [_ table-name]
-			      (:one-to-one (:relations (filter #(= (keyword table-name) (keyword (:name %)))
-							       (:tables schema)))))
-  (get-table-many-relations   [_ table-name]
-			      (:one-to-many (:relations (filter #(= (keyword table-name) (keyword (:name %)))
-								(:tables schema)))))
-  (get-field-load             [_ table-name field-name]
-			      nil))
+			      (map #(str-tools/as-str (:name %)) (:tables schema)))
+  (get-table                  [_ table-name]
+			      (first (filter #(= (keyword table-name) (keyword (:name %))) (:tables schema))))
+  (get-table-primary-key      [this table-name]
+			      (or (-> (.get-table this table-name) :primary-key) "id"))
+  (get-table-primary-key-type [this table-name]
+			      (or (-> (.get-table this table-name) :primary-key-type) "int(11)"))
+  (get-table-primary-key-auto [this table-name]
+			      (or (-> (.get-table this table-name) :primary-key-auto-increment)
+				  (str-tools/substring? "int" (str-tools/lower-case (name (.get-table-primary-key-type this table-name))))))
+  (get-table-fields           [this table-name]
+			      (-> (.get-table this table-name) :schema))
+  (get-table-one-relations    [this table-name]
+			      (-> (.get-table this table-name) :relations :one-to-one))
+  (get-table-many-relations   [this table-name]
+			      (-> (.get-table this table-name) :relations :one-to-many))
+  (get-field-load             [this table-name field-name]
+			      nil)) ;; TODO: get load-graph sorted out
 
 (defprotocol IDBField
   "Simple accessor for DBObjects, returns a column or relation object (loads if applicable/needed), and manages the access graph"
@@ -205,89 +205,89 @@
 	  db-name (or (:db-name db-schema) "slurm_db")
 	  db-user (or (:user db-schema) "root") ;; TODO: this is probably a bad idea for a default
 	  db-password (:password db-schema)
-	  db-tables (:tables db-schema)
 	  db-connection-spec {:classname "com.mysql.jdbc.Driver"
 			      :subprotocol "mysql"
 			      :subname (str db-root-subname db-name)
 			      :user db-user
-			      :password db-password}]
+			      :password db-password}
+	  db (DBConnection. db-connection-spec db-schema nil)]
 	;; check db schema for bad keys, and verify the db connection (create db if it doesn't exist)
 	(if (not (exists-db? db-connection-spec db-root-subname db-name))
 	  (do
 	    (raise SchemaWarningDBNoExist db-name "DB not found on host, will attempt to create it")
 	    (create-db db-connection-spec db-root-subname db-name)))
-	(let [unknown-keys (seq (filter (complement valid-schema-db-keys) (keys db-schema)))]
-	  (if (not-empty unknown-keys)
-	    (raise SchemaWarningUnknownKeys unknown-keys (str "Verify schema root keys"))))
+	(if (not-empty (seq (filter (complement valid-schema-db-keys) (keys db-schema))))
+	  (raise SchemaWarningUnknownKeys
+		 (filter (complement valid-schema-db-keys) (keys db-schema))
+		 (str "Verify schema root keys")))
 	;; Consume the table definitions
-	(doseq [table db-tables]
-	  (let [unknown-keys (seq (filter (complement valid-schema-table-keys) (keys table)))]
-	    (if (not-empty unknown-keys)
-	      (raise SchemaWarningUnknownKeys unknown-keys (str "Verify table definition for '" (name (:name table "<TABLE-NAME-KEY-MISSING>")) "'"))))
-	  (let [table-name (or (table :name) (raise SchemaErrorBadTableName table))
-		table-primary-key (get table :primary-key :id)
-		table-primary-key-type (get table :primary-key-type "int(11)")
-		table-primary-key-auto-increment (get table :primary-key-auto-increment true)
-		table-columns (get table :schema [])
-		table-columns (cons [table-primary-key table-primary-key-type "PRIMARY KEY" (if (and table-primary-key-auto-increment
-												     (str-tools/substring? "int"
-															   (str-tools/lower-case (name table-primary-key-type))))
-				                                                                     ;; only add auto-inc flag on int primary key types
-											      "AUTO_INCREMENT")] table-columns)
+	(doseq [table (:tables db-schema)]
+	  (if (not-empty (seq (filter (complement valid-schema-table-keys) (keys table))))
+	    (raise SchemaWarningUnknownKeys
+		   (filter (complement valid-schema-table-keys) (keys table))
+		   (str "Verify table definition for '" (name (:name table "<TABLE-NAME-KEY-MISSING>")) "'")))
+	  (if (nil? (.get-table db (:name table)))
+	    (raise SchemaErrorBadTableName table))
+	  (let [table-name (:name table)
+		table-columns (cons [(.get-table-primary-key db table-name)
+				     (.get-table-primary-key-type db table-name)
+				     "PRIMARY KEY"
+				     (if (.get-table-primary-key-auto db table-name)
+				         "AUTO_INCREMENT")]
+				    (or (.get-table-fields db table-name) []))
+		;; Single relations are keyed into the table schema directly
 		relations (for [relation (-> table :relations :one-to-one)]
-			    (let [related-table (first (filter #(identical? (:name %) relation) db-tables))
-				  related-table-name (:name related-table)
-				  related-table-primary-key (get related-table :primary-key :id)
-				  related-table-key-type (get related-table :primary-key-type "int(11)")
-				  related-table-key (generate-relation-key-name related-table-name related-table-primary-key)
-				  foreign-key-constraint (generate-foreign-key-constraint related-table-key related-table-name related-table-primary-key)]
-			      [[related-table-key related-table-key-type]
+			    (let [related-table-name (first (filter #(= (str-tools/as-str %) (str-tools/as-str relation)) (.get-table-names db)))
+				  related-table-key (generate-relation-key-name related-table-name (.get-table-primary-key db related-table-name))
+				  foreign-key-constraint (generate-foreign-key-constraint related-table-key related-table-name (.get-table-primary-key db related-table-name))]
+			      [[related-table-key (.get-table-primary-key-type db related-table-name)]
 			       foreign-key-constraint])) ;; returns a seq of relation key/type and constraint
 		;; TODO: figure out how to set engine when creating tables (looks like this will need to be a patch on contrib)
 		table-columns (concat table-columns (apply concat relations))]
 	    ;; TODO: figure out what to do on db-schema updates (currently left to the user
-	    ;;       to update table and slurm-schema on any change).
-	    ;; IDEA: inconsistencies between db-schema and slurm-schema should trigger warning
+	    ;;       to update table and slurm-schema on any change). Inconsistencies between
+	    ;;       db-schema and slurm-schema should probably trigger a warning, verify
+	    ;;       schema against table definition if it already exists.
 	    (do
 	      (if (not (exists-table? db-connection-spec db-root-subname db-name table-name))
 		(do
 		  (raise SchemaWarningTableNoExist (name table-name) "Table not found on host/db, will attempt to create it")
 		  (apply create-table db-connection-spec table-name table-columns))) ;; if table doesn't exist, create it
-	      (let [unknown-keys (seq (filter (complement valid-schema-relation-keys) (keys (-> table :relations))))]
-		(if (not-empty unknown-keys)
-		  (raise SchemaWarningUnknownKeys unknown-keys (str "Verify :relations keys on table '" (name table-name) "'"))))
+	      (if (not-empty (seq (filter (complement valid-schema-relation-keys) (keys (-> table :relations)))))
+		(raise SchemaWarningUnknownKeys
+		       (filter (complement valid-schema-relation-keys) (keys (-> table :relations)))
+		       (str "Verify :relations keys on table '" (name table-name) "'")))
+	      ;; Multi relations are keyed to an intermediate relation table
 	      (doseq [relation (-> table :relations :one-to-many)] ;; create multi-relation intermediate tables
-		(let [related-table (or (first (filter #(identical? (:name %) relation) db-tables))
+		(let [related-table-name (str-tools/as-str relation)
+		      related-table (or (.get-table db (str-tools/as-str (first (filter #(= (str-tools/as-str %) (str-tools/as-str related-table-name))
+											(.get-table-many-relations db table-name)))))
 					(raise SchemaErrorBadTableName relation
 					       (str "Relation table name not found or badly formed, on relation '"
-						    (name relation) "' in table definition '"
-						    (name table-name) "'")))
-		      origin-table-name table-name
-		      origin-table-primary-key table-primary-key
-		      origin-table-key (generate-relation-key-name origin-table-name origin-table-primary-key)
-		      origin-table-key-type table-primary-key-type
-		      related-table-name (:name related-table)
-		      related-table-primary-key (get related-table :primary-key :id)
-		      related-table-key (generate-relation-key-name related-table-name related-table-primary-key)
-		      related-table-key-type (get related-table :primary-key-type "int(11)")
+						    (str-tools/as-str relation) "' in table definition '"
+						    (str-tools/as-str table-name) "'")))
+		      origin-table-key (generate-relation-key-name table-name (.get-table-primary-key db table-name))
+		      related-table-key (generate-relation-key-name related-table-name (.get-table-primary-key db related-table-name))
+		      related-table-key-type (.get-table-primary-key-type db related-table-name)
 		      relation-table-name (generate-relation-table-name table-name related-table-name)
-		      relation-table-primary-key [:id "int(11)" "PRIMARY KEY" "AUTO_INCREMENT"] ;; relation tables cannot have configurable primary keys
-		      relation-table-columns (conj [] relation-table-primary-key)
-		      relation-table-columns (conj relation-table-columns [origin-table-key origin-table-key-type])
+		      relation-table-columns (conj [] [:id "int(11)" "PRIMARY KEY" "AUTO_INCREMENT"]) ;; relation tables cannot have configurable primary keys
+		      relation-table-columns (conj relation-table-columns [origin-table-key (.get-table-primary-key-type db table-name)])
 		      relation-table-columns (conj relation-table-columns (generate-foreign-key-constraint-cascade-delete origin-table-key
-															  origin-table-name
-															  origin-table-primary-key))
+															  table-name
+															  (.get-table-primary-key db table-name)))
 		      relation-table-columns (conj relation-table-columns [related-table-key related-table-key-type])
 		      relation-table-columns (conj relation-table-columns (generate-foreign-key-constraint-cascade-delete related-table-key
 															  related-table-name
-															  related-table-primary-key))]
+															  (.get-table-primary-key db (:name related-table))))]
 		  (if (not (exists-table? db-connection-spec db-root-subname db-name relation-table-name))
 		    (do
-		      (raise SchemaWarningTableNoExist (name relation-table-name) (str "Relation intermediary table (for "
-										       (name table-name) "->"
-										       (name related-table-name) ") not found on host/db, will attempt to create it"))
+		      (raise SchemaWarningTableNoExist
+			     (str-tools/as-str related-table-name)
+			     (str "Relation intermediary table (for "
+				  (str-tools/as-str table-name) "->"
+				  (str-tools/as-str related-table-name) ") not found on host/db, will attempt to create it"))
 		      (apply create-table db-connection-spec relation-table-name relation-table-columns))))))))
-      (DBConnection. db-connection-spec db-schema nil))
+      db)
     (handle SchemaWarning [] (continue-with nil)) ;; NOTE: Logging behaviour is handled in the SchemaError/Warning def
     (handle SchemaError [])))                     ;;       Empty handlers are to supress java exception
 
@@ -298,6 +298,7 @@
     (do
       (if (nil? schema-file)
 	(println "Slurm command-line utility used to verify and initialize schema definition.\nUsage: java -jar slurm.jar <schema-filename>")
-	(let [db (SlurmDB. (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e)))))
+	(let [db (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e))))
+	      slurm (SlurmDB. db)
 	      new-row (DBConstruct. :student {:name "Test Student"})]
-	  (.create db new-row))))))
+	  (println (.get-table-names db)))))))
