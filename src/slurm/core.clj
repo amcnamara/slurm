@@ -17,6 +17,7 @@
   (get-table-fields           [#^DBConnection db-connection table-name])
   (get-table-one-relations    [#^DBConnection db-connection table-name])
   (get-table-many-relations   [#^DBConnection db-connection table-name])
+  (get-field-type             [#^DBConnection db-connection table-name field-name])
   (get-field-load             [#^DBConnection db-connection table-name field-name]))
 
 ;; Functions for returning common introspection data on schema and load-graph
@@ -39,6 +40,8 @@
 			      (-> (.get-table this table-name) :relations :one-to-one))
   (get-table-many-relations   [this table-name]
 			      (-> (.get-table this table-name) :relations :one-to-many))
+  (get-field-type             [this table-name field-name]
+			      (get (.get-table-fields this table-name) (keyword field-name)))
   (get-field-load             [this table-name field-name]
 			      nil)) ;; TODO: get load-graph sorted out
 
@@ -48,7 +51,7 @@
 
 (defrecord DBObject [table-name primary-key columns]
   IDBField
-  (field [_ column-name] (get columns column-name))) ;; TODO: lazies should return a clause, then load and return result on fetch
+  (field [_ column-name] (get columns (keyword column-name)))) ;; TODO: lazies should return a clause, then load and return result on fetch
 
 (defrecord DBConstruct [table-name columns])
 
@@ -79,12 +82,13 @@
 			(str "\"" value "\"")
 			value)
 	request (str "SELECT * FROM " table-name " WHERE " column-name " " operator " " escaped-value)] ;; TODO: Create a helper to sanitize clauses
+    (println "SQL -> " request)
     (do
       (sql/with-connection db-connection-spec
 	(sql/with-query-results query-results
 	  [request]
 	  (doall (for [result query-results]
-		   (let [primary-key (get (keyword table-primary-key) result "NULL") ;; TODO: fire off a warning on no PK
+		   (let [primary-key (get result (keyword table-primary-key) "NULL") ;; TODO: fire off a warning on no PK
 			 columns (dissoc (into {} result) (keyword table-primary-key))]
 		     (DBObject. (keyword table-name) primary-key columns)))))))))
 
@@ -96,12 +100,13 @@
 	escaped-primary-key-value (if primary-key-type-is-string
 				    (str "\"" primary-key-value "\"")
 				    primary-key-value)
-	escaped-column-values (for [[column-name column-value] columns]
-				(if (string? column-value) ;; TODO: make this more rigorous by comparing type with schema instead of value
-				  (str (name column-name) " = \"" column-value "\"")
-				  (str (name column-name) " = " column-value)))
+	escaped-column-values (filter (complement nil?)
+				      (for [[column-name column-value] columns]
+					(cond (string? column-value)    (str (name column-name) " = \"" column-value "\"") ;; TODO: make this more rigorous by comparing type with schema instead of value
+					      (not (nil? column-value)) (str (name column-name) " = " column-value))))
 	formatted-columns (apply str (interpose ", " escaped-column-values))
 	request (str "UPDATE " table-name " SET " formatted-columns " WHERE " primary-key " = " escaped-primary-key-value)]
+    (println "SQL -> " request)
     (sql/with-connection db-connection-spec
       (sql/do-commands request)))) ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
 
@@ -115,6 +120,7 @@
 				    (str "\"" primary-key-value "\"")
 				    primary-key-value)
 	request (str "DELETE FROM " table-name " WHERE " primary-key " = " escaped-primary-key-value)]
+    (println "SQL -> " request)
     (sql/with-connection db-connection-spec
       (sql/do-commands request))))
 
@@ -130,43 +136,28 @@
 (defrecord SlurmDB [#^DBConnection db-connection]
   ISlurm
   (create [_ object]
-	  (let [db-connection-spec (:spec db-connection)
-		table-name (name (:table-name object))
-		columns (:columns object)]
-	    (insert-db-record db-connection-spec table-name columns)))
+	  (insert-db-record (:spec db-connection) (name (:table-name object)) (:columns object)))
   (fetch  [_ clause]
-	  (let [db-connection-spec (:spec db-connection)
-		db-schema (:schema db-connection)
-		table-name (name (:table-name clause))
-		table-def (first (filter #(= (keyword (:name %)) (keyword table-name))
-					 (-> db-schema :tables)))
-		table-primary-key (get table-def :primary-key :id)
-		column-name (name (:column-name clause))
-		column-type (name (get (:schema table-def) (keyword column-name) "int(11)"))
-		operator (name (or (:operator clause) :=))
-		value (:value clause)]
-	    (select-db-record db-connection-spec table-name table-primary-key column-name column-type operator value)))
+	  (select-db-record (:spec db-connection)
+			    (name (:table-name clause))
+			    (.get-table-primary-key db-connection (name (:table-name clause)))
+			    (name (:column-name clause))
+			    (.get-field-type db-connection (name (:table-name clause)) (name (:column-name clause)))
+			    (name (or (:operator clause) :=))
+			    (:value clause)))
   (update [_ object]
-	  (let [db-connection-spec (:spec db-connection)
-		db-schema (:schema db-connection)
-		table-name (name (:table-name object))
-		table-def (first (filter #(= (keyword (:name %)) (keyword table-name))
-					 (-> db-schema :tables)))
-		table-primary-key (get table-def :primary-key :id)
-		table-primary-key-type (get table-def :primary-key-type "int(11)")
-		primary-key-value (:primary-key object)
-		columns (:columns object)]
-	    (update-db-record db-connection-spec table-name table-primary-key table-primary-key-type primary-key-value columns)))
+	  (update-db-record (:spec db-connection)
+			    (name (:table-name object))
+			    (.get-table-primary-key db-connection (name (:table-name object)))
+			    (.get-table-primary-key-type db-connection (name (:table-name object)))
+			    (:primary-key object)
+			    (:columns object)))
   (delete [_ object]
-	  (let [db-connection-spec (:spec db-connection)
-		db-schema (:schema db-connection)
-		table-name (name (:table-name object))
-		table-def (first (filter #(= (keyword (:name %)) (keyword table-name))
-					 (-> db-schema :tables)))
-		table-primary-key (get table-def :primary-key :id)
-		table-primary-key-type (get table-def :primary-key-type "int(11)")
-		object-primary-key-value (get (:columns object) (keyword table-primary-key))]
-	    (delete-db-record db-connection-spec table-name table-primary-key table-primary-key-type object-primary-key-value))))
+	  (delete-db-record (:spec db-connection)
+			    (name (:table-name object))
+			    (.get-table-primary-key db-connection (name (:table-name object)))
+			    (.get-table-primary-key-type db-connection (name (:table-name object)))
+			    (get (:columns object) (keyword (.get-table-primary-key db-connection (name (:table-name object))))))))
 
 ;; DB Interface (direct access)
 (defprotocol IDBAccess
@@ -270,7 +261,7 @@
 		      related-table-key (generate-relation-key-name related-table-name (.get-table-primary-key db related-table-name))
 		      related-table-key-type (.get-table-primary-key-type db related-table-name)
 		      relation-table-name (generate-relation-table-name table-name related-table-name)
-		      relation-table-columns (conj [] [:id "int(11)" "PRIMARY KEY" "AUTO_INCREMENT"]) ;; relation tables cannot have configurable primary keys
+		      relation-table-columns [[:id "int(11)" "PRIMARY KEY" "AUTO_INCREMENT"]] ;; relation tables cannot have configurable primary keys
 		      relation-table-columns (conj relation-table-columns [origin-table-key (.get-table-primary-key-type db table-name)])
 		      relation-table-columns (conj relation-table-columns (generate-foreign-key-constraint-cascade-delete origin-table-key
 															  table-name
@@ -298,7 +289,5 @@
     (do
       (if (nil? schema-file)
 	(println "Slurm command-line utility used to verify and initialize schema definition.\nUsage: java -jar slurm.jar <schema-filename>")
-	(let [db (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e))))
-	      slurm (SlurmDB. db)
-	      new-row (DBConstruct. :student {:name "Test Student"})]
-	  (println (.get-table-names db)))))))
+	(let [db (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e))))]
+	  (println "Database schema successfully initialized"))))))
