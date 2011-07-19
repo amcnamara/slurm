@@ -1,7 +1,8 @@
 (ns slurm.util
-  (:require [clojure.contrib.sql :as sql])
-  (:use [clojure.contrib.error-kit]
-	[slurm.error]))
+  (:require [clojure.contrib.sql    :as sql]
+	    [clojure.contrib.string :as str-tools])
+  (:use     [clojure.contrib.error-kit]
+	    [slurm.error]))
 
 (defn exists-db?
   "Checks that a given DB exists on the host"
@@ -77,6 +78,11 @@
 
 ;; TODO: add this
 (defn dump-load-graph [] ())
+
+(defn escape-field-value [value column-type]
+  (if (str-tools/substring? "varchar" (str-tools/lower-case (name column-type)))
+    (str "\"" value "\"")
+    value))
 
 (defn generate-relation-table-name [table-name-from table-name-to]
   "Formats a keyword to represent a one-to-many table name from the two related tables"

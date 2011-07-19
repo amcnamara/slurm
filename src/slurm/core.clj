@@ -1,10 +1,10 @@
 (ns slurm.core
-  (:gen-class)
-  (:require [clojure.contrib.sql :as sql]
+  (:require [clojure.contrib.sql    :as sql]
 	    [clojure.contrib.string :as str-tools])
-  (:use [clojure.contrib.error-kit]
-	[slurm.error]
-	[slurm.util]))
+  (:use     [clojure.contrib.error-kit]
+	    [slurm.error]
+	    [slurm.util])
+  (:gen-class))
 
 ;; DB Access Objects
 (defprotocol IDBInfo
@@ -45,13 +45,17 @@
   (get-field-load             [this table-name field-name]
 			      nil)) ;; TODO: get load-graph sorted out
 
-(defprotocol IDBField
+(defprotocol IDBRecord
   "Simple accessor for DBObjects, returns a column or relation object (loads if applicable/needed), and manages the access graph"
-  (field [#^DBObject object field]))
+  (field  [#^DBObject object column-name])
+  (assoc* [#^DBObject object new-columns]))
 
 (defrecord DBObject [table-name primary-key columns]
-  IDBField
-  (field [_ column-name] (get columns (keyword column-name)))) ;; TODO: lazies should return a clause, then load and return result on fetch
+  IDBRecord
+  (field  [_ column-name]
+	  (get columns (keyword column-name))) ;; TODO: lazies should return a clause, then load and return result on fetch
+  (assoc* [_ new-columns]
+	  (DBObject. table-name primary-key (into columns new-columns))))
 
 (defrecord DBConstruct [table-name columns])
 
@@ -65,64 +69,50 @@
      (sql/insert-records
       table-name
       record)
-     (let [request "SELECT LAST_INSERT_ID()"] ;; NOTE: this should return independently on each connection, races shouldn't be an issue (should verify this)
-       (sql/with-query-results query-results
-	 [request]
-	 (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record))))))) ;; TODO: kill PK in column struct
+     (sql/with-query-results query-results
+       ["SELECT LAST_INSERT_ID()"] ;; NOTE: this should return independently on each connection/transaction, races shouldn't be an issue (must verify this)
+       (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record))))))
 
 (defn- select-db-record [db-connection-spec table-name table-primary-key column-name column-type operator value]
-  (let [table-name (name table-name)
-	table-primary-key (name table-primary-key)
-	column-name (name column-name)
-	column-type (name column-type) ;; NOTE: Column type matters when querying strings (must be escaped) and for
-	                               ;;       some advanced queries (eg. between clauses) which shouldn't be escaped.
-	operator (name (or operator :=))
-	column-type-is-string (str-tools/substring? "varchar" (str-tools/lower-case column-type))
-	escaped-value (if column-type-is-string
-			(str "\"" value "\"")
-			value)
-	request (str "SELECT * FROM " table-name " WHERE " column-name " " operator " " escaped-value)] ;; TODO: Create a helper to sanitize clauses
-    (println "SQL -> " request)
-    (do
-      (sql/with-connection db-connection-spec
-	(sql/with-query-results query-results
-	  [request]
-	  (doall (for [result query-results]
-		   (let [primary-key (get result (keyword table-primary-key) "NULL") ;; TODO: fire off a warning on no PK
-			 columns (dissoc (into {} result) (keyword table-primary-key))]
-		     (DBObject. (keyword table-name) primary-key columns)))))))))
+  (sql/with-connection db-connection-spec
+    (sql/with-query-results query-results
+      [(str-tools/as-str "SELECT * FROM "
+			 table-name
+			 " WHERE "
+			 column-name " "
+			 (or operator :=) " "
+			 (escape-field-value value column-type))]
+      (doall (for [result query-results]
+	       (let [primary-key (get result (keyword table-primary-key) "NULL") ;; TODO: fire off a warning on no PK
+		     columns (dissoc (into {} result) (keyword table-primary-key))]
+		 (DBObject. (keyword table-name) primary-key columns)))))))
 
+;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
+;; TODO: make typechecking (strings must escape!) more rigorous by comparing with schema instead of value (consider making this a helper)
 (defn- update-db-record [db-connection-spec table-name primary-key primary-key-type primary-key-value columns]
-  (let [table-name (name table-name)
-	primary-key (name primary-key)
-	primary-key-type (name primary-key-type)
-	primary-key-type-is-string (str-tools/substring? "varchar" (str-tools/lower-case primary-key-type))
-	escaped-primary-key-value (if primary-key-type-is-string
-				    (str "\"" primary-key-value "\"")
-				    primary-key-value)
-	escaped-column-values (filter (complement nil?)
-				      (for [[column-name column-value] columns]
-					(cond (string? column-value)    (str (name column-name) " = \"" column-value "\"") ;; TODO: make this more rigorous by comparing type with schema instead of value
-					      (not (nil? column-value)) (str (name column-name) " = " column-value))))
-	formatted-columns (apply str (interpose ", " escaped-column-values))
-	request (str "UPDATE " table-name " SET " formatted-columns " WHERE " primary-key " = " escaped-primary-key-value)]
-    (println "SQL -> " request)
-    (sql/with-connection db-connection-spec
-      (sql/do-commands request)))) ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
+  (sql/with-connection db-connection-spec
+    (sql/do-commands (str-tools/as-str "UPDATE "
+				       table-name
+				       " SET "
+				       (interpose ", "
+						  (filter (complement nil?)
+							  (for [[column-name column-value] columns]
+							    (cond (string? column-value)    (str (name column-name) " = \"" column-value "\"")
+								  (not (nil? column-value)) (str (name column-name) " = "   column-value)))))
+				       " WHERE "
+				       primary-key
+				       " = "
+				       (escape-field-value primary-key-value primary-key-type)))))
 
 ;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
 (defn- delete-db-record [db-connection-spec table-name primary-key primary-key-type primary-key-value]
-  (let [table-name (name table-name)
-	primary-key (name primary-key)
-	primary-key-type (name primary-key-type)
-	primary-key-type-is-string (str-tools/substring? "varchar" (str-tools/lower-case primary-key-type))
-	escaped-primary-key-value (if primary-key-type-is-string
-				    (str "\"" primary-key-value "\"")
-				    primary-key-value)
-	request (str "DELETE FROM " table-name " WHERE " primary-key " = " escaped-primary-key-value)]
-    (println "SQL -> " request)
-    (sql/with-connection db-connection-spec
-      (sql/do-commands request))))
+  (sql/with-connection db-connection-spec
+    (sql/do-commands (str-tools/as-str "DELETE FROM "
+				       table-name
+				       " WHERE "
+				       primary-key
+				       " = "
+				       (escape-field-value primary-key-value primary-key-type)))))
 
 ;; ORM Interface (proper)
 (defprotocol ISlurm
@@ -181,6 +171,7 @@
 	       (sql/do-commands command)))))
   
 ;; Initialization and Verification
+;; TODO: support server pools at some point, for now just grab a single hostname
 ;; TODO: ugly, fix
 (defn init
   "Configures DB connection, and initializes DB schema (creates db and tables if needed)."
@@ -189,7 +180,6 @@
   (with-handler
     (let [db-schema (try (read-string (str schema-def)) (catch Exception e (println "Could not read schema definition.\nTrace:" e)))
 	  db-host (get db-schema :db-server-pool "localhost")
-	  ;; TODO: support server pools at some point, for now just grab a single hostname
 	  db-host (if (string? db-host) db-host (first db-host)) ;; allow vector (multiple) or string (single) server defs
 	  db-port (or (:db-port db-schema) 3306)
 	  db-root-subname (str "//" db-host ":" db-port "/")

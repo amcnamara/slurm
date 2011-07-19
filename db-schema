@@ -4,7 +4,7 @@
  :tables #{{:name :student
 	    :schema {:name "varchar(64)"}
 	    :relations {:one-to-many [:course]
-		       :one-to-one  [:address]}}
+			:one-to-one  [:address]}}
 	   {:name :course
 	    :schema {:name "varchar(32)"
 		     :completed "bool"}
@@ -20,11 +20,11 @@
 	    :schema {:name "varchar(64)"
 		     :founded "date"}
 	    :relations {:one-to-many [:faculty]
-		       :one-to-one  [:address]}}
+			:one-to-one  [:address]}}
 	   {:name :degree
 	    :schema {:name "varchar(64)"}
 	    :relations {:one-to-many [:course]
-		       :one-to-one  [:faculty]}}
+			:one-to-one  [:faculty]}}
 	   {:name :faculty
 	    :schema {:name "varchar(128)"
 		     :dean "varchar(64)"}
