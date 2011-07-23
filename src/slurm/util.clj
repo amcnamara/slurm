@@ -117,10 +117,5 @@
     :primary-key
     :primary-key-type
     :primary-key-auto-increment
-    :schema
-    :relations
+    :fields
     :index})
-
-(def valid-schema-relation-keys
-  #{:one-to-one
-    :one-to-many})
