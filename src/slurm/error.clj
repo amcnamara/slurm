@@ -1,8 +1,8 @@
 (ns slurm.error
   (:use [clojure.contrib.error-kit]))
 
-(def warn-log "log/warning.log")
-(def error-log "log/error.log")
+(def warn-log  "warning.log")
+(def error-log "error.log")
 
 (defn write-log [log record]
   (spit log (str record "\n") :append true))

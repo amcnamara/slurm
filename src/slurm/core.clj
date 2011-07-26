@@ -1,8 +1,8 @@
 (ns slurm.core
-  (:require [clojure.contrib.sql    :as sql]
-	    [clojure.contrib.string :as str-tools])
+  (:require [clojure.contrib.sql :as sql]
+	    [slurm.error         :as err])
   (:use     [clojure.contrib.error-kit]
-	    [slurm.error]
+	    [clojure.contrib.string :only (as-str substring? lower-case)]
 	    [slurm.util])
   (:gen-class))
 
@@ -27,7 +27,7 @@
 (defrecord DBConnection [spec schema load-graph]
   IDBInfo
   (get-table-names            [_]
-			      (map #(str-tools/as-str (:name %)) (:tables schema)))
+			      (map #(as-str (:name %)) (:tables schema)))
   (get-table                  [_ table-name]
 			      (first (filter #(= (keyword table-name) (keyword (:name %))) (:tables schema))))
   (get-table-primary-key      [this table-name]
@@ -36,7 +36,7 @@
 			      (or (-> (.get-table this table-name) :primary-key-type) "int(11)"))
   (get-table-primary-key-auto [this table-name]
 			      (or (-> (.get-table this table-name) :primary-key-auto-increment)
-				  (str-tools/substring? "int" (str-tools/lower-case (name (.get-table-primary-key-type this table-name))))))
+				  (substring? "int" (lower-case (name (.get-table-primary-key-type this table-name))))))
   (get-table-schema           [this table-name]
 			      (-> (.get-table this table-name) :fields))
   (get-table-fields           [this table-name]
@@ -79,9 +79,7 @@
 (defn- insert-db-record [db-connection-spec table-name record]
   (sql/with-connection db-connection-spec
     (sql/transaction
-     (sql/insert-records
-      table-name
-      record)
+     (sql/insert-records table-name record)
      (sql/with-query-results query-results
        ["SELECT LAST_INSERT_ID()"] ;; NOTE: this should return independently on each connection/transaction, races shouldn't be an issue (must verify this)
        (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record))))))
@@ -89,12 +87,12 @@
 (defn- select-db-record [db-connection-spec table-name table-primary-key column-name column-type operator value]
   (sql/with-connection db-connection-spec
     (sql/with-query-results query-results
-      [(str-tools/as-str "SELECT * FROM "
-			 table-name
-			 " WHERE "
-			 column-name " "
-			 (or operator :=) " "
-			 (escape-field-value value column-type))]
+      [(join-as-str " " "SELECT * FROM"
+		        table-name
+			"WHERE"
+			column-name
+			(or operator :=)
+			(escape-field-value value column-type))]
       (doall (for [result query-results]
 	       (let [primary-key (get result (keyword table-primary-key) "NULL") ;; TODO: fire off a warning on no PK
 		     columns     (dissoc (into {} result) (keyword table-primary-key))]
@@ -104,28 +102,28 @@
 ;; TODO: make typechecking (strings must escape!) more rigorous by comparing with schema instead of value (consider making this a helper)
 (defn- update-db-record [db-connection-spec table-name primary-key primary-key-type primary-key-value columns]
   (sql/with-connection db-connection-spec
-    (sql/do-commands (str-tools/as-str "UPDATE "
-				       table-name
-				       " SET "
-				       (interpose ", "
-						  (filter (complement nil?)
-							  (for [[column-name column-value] columns]
-							    (cond (string? column-value)    (str (name column-name) " = \"" column-value "\"")
-								  (not (nil? column-value)) (str (name column-name) " = "   column-value)))))
-				       " WHERE "
-				       primary-key
-				       " = "
-				       (escape-field-value primary-key-value primary-key-type)))))
+    (sql/do-commands (join-as-str " " "UPDATE"
+				      table-name
+				      "SET"
+				      (join-as-str ", "
+						   (filter (complement nil?)
+							   (for [[column-name column-value] columns]
+							     (cond (string? column-value)    (str (name column-name) " = \"" column-value "\"")
+								   (not (nil? column-value)) (str (name column-name) " = "   column-value)))))
+				      "WHERE"
+				      primary-key
+				      "="
+				      (escape-field-value primary-key-value primary-key-type)))))
 
 ;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
 (defn- delete-db-record [db-connection-spec table-name primary-key primary-key-type primary-key-value]
   (sql/with-connection db-connection-spec
-    (sql/do-commands (str-tools/as-str "DELETE FROM "
-				       table-name
-				       " WHERE "
-				       primary-key
-				       " = "
-				       (escape-field-value primary-key-value primary-key-type)))))
+    (sql/do-commands (join-as-str " " "DELETE FROM"
+				      table-name
+				      "WHERE"
+				      primary-key
+				      "="
+				      (escape-field-value primary-key-value primary-key-type)))))
 
 ;; ORM Interface (proper)
 (defprotocol ISlurm
@@ -198,7 +196,7 @@
   [schema-def
    & [fetch-graph]]
   (with-handler
-    (let [db-schema          (try (read-string (str schema-def)) (catch Exception e (println "Could not read schema definition.\nTrace:" e)))
+    (let [db-schema          (try (read-string (str schema-def)) (catch Exception e (raise err/SchemaError e "Could not read schema definiton.")))
 	  db-host            (get db-schema :db-server-pool "localhost")
 	  db-host            (if (string? db-host) db-host (first db-host)) ;; allow vector (multiple) or string (single) server defs
 	  db-port            (or (:db-port db-schema) 3306)
@@ -215,20 +213,20 @@
 	;; check db schema for bad keys, and verify the db connection (create db if it doesn't exist)
 	(if (not (exists-db? db-connection-spec db-root-subname db-name))
 	  (do
-	    (raise SchemaWarningDBNoExist db-name "DB not found on host, will attempt to create it")
+	    (raise err/SchemaWarningDBNoExist db-name "DB not found on host, will attempt to create it")
 	    (create-db db-connection-spec db-root-subname db-name)))
 	(if (not-empty (seq (filter (complement valid-schema-db-keys) (keys db-schema))))
-	  (raise SchemaWarningUnknownKeys
+	  (raise err/SchemaWarningUnknownKeys
 		 (filter (complement valid-schema-db-keys) (keys db-schema))
 		 (str "Verify schema root keys")))
 	;; Consume the table definitions
 	(doseq [table (:tables db-schema)]
 	  (if (not-empty (seq (filter (complement valid-schema-table-keys) (keys table))))
-	    (raise SchemaWarningUnknownKeys
+	    (raise err/SchemaWarningUnknownKeys
 		   (filter (complement valid-schema-table-keys) (keys table))
 		   (str "Verify table definition for '" (name (:name table "<TABLE-NAME-KEY-MISSING>")) "'")))
 	  (if (nil? (.get-table db (:name table)))
-	    (raise SchemaErrorBadTableName table))
+	    (raise err/SchemaErrorBadTableName table))
 	  (let [table-name    (:name table)
 		table-columns (cons [(.get-table-primary-key db table-name)
 				     (.get-table-primary-key-type db table-name)
@@ -247,19 +245,18 @@
 				   foreign-key-constraint])) ;; returns a seq of relation key/type and constraint
 		table-columns (concat table-columns (apply concat relations))]
 	    (do
-	      (println ">>>" table-columns)
 	      (if (not (exists-table? db-connection-spec db-root-subname db-name table-name))
 		(do
-		  (raise SchemaWarningTableNoExist (name table-name) "Table not found on host/db, will attempt to create it")
+		  (raise err/SchemaWarningTableNoExist (name table-name) "Table not found on host/db, will attempt to create it")
 		  (apply create-table db-connection-spec table-name table-columns))) ;; if table doesn't exist, create it
 	      ;; Multi relations are keyed to an intermediate relation table
 	      (doseq [relation (.get-table-many-relations db table-name)] ;; create multi-relation intermediate tables
-		(let [related-table-name    (.get-table-field-type db table-name relation)
-		      related-table         (or (.get-table db related-table-name)
-						(raise SchemaErrorBadTableName relation
-						       (str "Relation table name not found or badly formed, on relation '"
-							    (str-tools/as-str relation) "' in table definition '"
-							    (str-tools/as-str table-name) "'")))
+		(let [related-table-name     (.get-table-field-type db table-name relation)
+		      related-table          (or (.get-table db related-table-name)
+						 (raise err/SchemaErrorBadTableName relation
+							(str "Relation table name not found or badly formed, on relation '"
+							     (as-str relation) "' in table definition '"
+							     (as-str table-name) "'")))
 		      origin-table-key       (generate-relation-key-name table-name (.get-table-primary-key db table-name))
 		      related-table-key      (generate-relation-key-name related-table-name (.get-table-primary-key db related-table-name))
 		      related-table-key-type (.get-table-primary-key-type db related-table-name)
@@ -275,15 +272,17 @@
 															  (.get-table-primary-key db related-table-name)))]
 		  (if (not (exists-table? db-connection-spec db-root-subname db-name relation-table-name))
 		    (do
-		      (raise SchemaWarningTableNoExist
-			     (str-tools/as-str related-table-name)
-			     (str "Relation intermediary table (for "
-				  (str-tools/as-str table-name) "->"
-				  (str-tools/as-str related-table-name) ") not found on host/db, will attempt to create it"))
+		      (raise err/SchemaWarningTableNoExist
+			     (as-str related-table-name)
+			     (join-as-str " " "Relation intermediary table (for"
+					      table-name
+					      "->"
+					      related-table-name
+					      ") not found on host/db, will attempt to create it"))
 		      (apply create-table db-connection-spec relation-table-name relation-table-columns))))))))
 	db)
-    (handle SchemaWarning [] (continue-with nil)) ;; NOTE: Logging behaviour is handled in the SchemaError/Warning def
-    (handle SchemaError   [])))                   ;;       Empty handlers are to supress java exception
+    (handle err/SchemaWarning [] (continue-with nil)) ;; NOTE: Logging behaviour is handled in the SchemaError/Warning def
+    (handle err/SchemaError   [])))                   ;;       Empty handlers are to supress java exception
 
 ;; Command-line Interface (used to initialize schemas only)
 ;; TODO: at some point add a REPL to allow playing with the DB through the CLI

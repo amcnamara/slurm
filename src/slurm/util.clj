@@ -1,8 +1,8 @@
 (ns slurm.util
   (:require [clojure.contrib.sql    :as sql]
-	    [clojure.contrib.string :as str-tools])
+	    [slurm.error            :as err])
   (:use     [clojure.contrib.error-kit]
-	    [slurm.error]))
+	    [clojure.contrib.string :only (join substring? lower-case as-str)]))
 
 (defn exists-db?
   "Checks that a given DB exists on the host"
@@ -17,8 +17,8 @@
 	    [request]
 	    (not (empty? query-results)))))
       (catch Exception e
-	(raise SchemaError e (str "Error verifying db (" (db-name) ") on host"))))
-    (handle SchemaError [])))
+	(raise err/SchemaError e (str "Error verifying db (" (db-name) ") on host"))))
+    (handle err/SchemaError [])))
   
 (defn exists-table?
   "Checks that a given table exists on the given host/db"
@@ -34,8 +34,8 @@
 	    [request]
 	    (not (empty? query-results)))))
       (catch Exception e
-	(raise SchemaError e (str "Error verifying table (" (name table-name) ") on host/db (" (name db-name) ")"))))
-    (handle SchemaError [])))
+	(raise err/SchemaError e (str "Error verifying table (" (name table-name) ") on host/db (" (name db-name) ")"))))
+    (handle err/SchemaError [])))
 
 (defn create-db
   "Attempts to create a given DB"
@@ -48,8 +48,8 @@
 	(sql/with-connection db-root
 	  (sql/do-commands request))) ;; TODO: how to verify this worked other than not hitting an exception?
       (catch Exception e
-	(raise SchemaErrorBadDBName e (str "Could not create database (" (name db-name) "), probably due to a badly formed database name."))))
-    (handle SchemaError [])))
+	(raise err/SchemaErrorBadDBName e (str "Could not create database (" (name db-name) "), probably due to a badly formed database name."))))
+    (handle err/SchemaError [])))
 
 (defn create-table
   "Attempts to create a table with the specified schema"
@@ -59,8 +59,8 @@
       (sql/with-connection db-connection-spec
 	(apply sql/create-table table-name table-schema))
       (catch Exception e
-	(raise SchemaErrorBadTableName e (str "Could not create table (" (name table-name) "), probably due to a badly formed table name."))))
-    (handle SchemaError [])))
+	(raise err/SchemaErrorBadTableName e (str "Could not create table (" (name table-name) "), probably due to a badly formed table name."))))
+    (handle err/SchemaError [])))
 
 ;; TODO: use this to verify slurm schema is consistent with database schema
 ;; IDEA: if not consistent, use descriptions to generate a new/updated slurm schema -- this would greatly reduce adoption pain for live dbs
@@ -80,9 +80,12 @@
 (defn dump-load-graph [] ())
 
 (defn escape-field-value [value column-type]
-  (if (str-tools/substring? "varchar" (str-tools/lower-case (name column-type)))
+  (if (substring? "varchar" (lower-case (name column-type)))
     (str "\"" value "\"")
     value))
+
+(defn join-as-str [separator & coll]
+  (join separator (map as-str coll)))
 
 (defn generate-relation-table-name [table-name-from table-name-to]
   "Formats a keyword to represent a one-to-many table name from the two related tables"
