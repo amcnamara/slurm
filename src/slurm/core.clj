@@ -1,8 +1,8 @@
 (ns slurm.core
   (:require [clojure.contrib.sql :as sql]
 	    [slurm.error         :as err])
-  (:use     [clojure.contrib.error-kit]
-	    [clojure.contrib.string :only (as-str substring? lower-case)]
+  (:use     [clojure.contrib.error-kit :only (with-handler handle continue-with raise)]
+	    [clojure.contrib.string    :only (as-str substring? lower-case)]
 	    [slurm.util])
   (:gen-class))
 
@@ -42,10 +42,11 @@
   (get-table-fields           [this table-name]
 			      (keys (.get-table-schema this table-name)))
   (get-table-field-type       [this table-name field-name]
-			      (let [type (get (.get-table-schema this table-name) (keyword field-name))]
-				(if (and (keyword? type) (= \* (first (name type))))
-				  (keyword (apply str (rest (name type))))
-				  type)))
+			      (or (let [type (get (.get-table-schema this table-name) (keyword field-name))]
+				    (if (and (keyword? type) (= \* (first (name type))))
+				      (keyword (apply str (rest (name type))))
+				      type))
+				  "int(11)"))
   (get-table-field-load       [this table-name field-name]
 			      nil)
   (get-table-relations        [this table-name]
@@ -84,8 +85,8 @@
        ["SELECT LAST_INSERT_ID()"] ;; NOTE: this should return independently on each connection/transaction, races shouldn't be an issue (must verify this)
        (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record))))))
 
-(defn- select-db-record [db-connection-spec table-name table-primary-key column-name column-type operator value]
-  (sql/with-connection db-connection-spec
+(defn- select-db-record [db-connection table-name table-primary-key column-name column-type operator value]
+  (sql/with-connection (:spec db-connection)
     (sql/with-query-results query-results
       [(join-as-str " " "SELECT * FROM"
 		        table-name
@@ -95,7 +96,17 @@
 			(escape-field-value value column-type))]
       (doall (for [result query-results]
 	       (let [primary-key (get result (keyword table-primary-key) "NULL") ;; TODO: fire off a warning on no PK
-		     columns     (dissoc (into {} result) (keyword table-primary-key))]
+		     columns     (dissoc (into {} result) (keyword table-primary-key))
+		     columns     (into columns
+				       (for [[key value] columns] ;; Grab single relations and inject them back into the DBObject columns
+					 (if (contains? (set (.get-table-one-relations db-connection table-name)) (keyword key))
+					   [key (select-db-record db-connection
+								  (.get-table-field-type db-connection table-name key)
+								  (.get-table-primary-key db-connection (.get-table-field-type db-connection table-name key))
+								  (.get-table-primary-key db-connection (.get-table-field-type db-connection table-name key))
+								  (.get-table-primary-key-type db-connection (.get-table-field-type db-connection table-name key))
+								  :=
+								  value)])))]
 		 (DBObject. (keyword table-name) primary-key columns)))))))
 
 ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
@@ -141,7 +152,7 @@
 			    (name (:table-name object))
 			    (:columns object)))
   (fetch  [_ clause]
-	  (select-db-record (:spec db-connection)
+	  (select-db-record db-connection
 			    (name (:table-name clause))
 			    (.get-table-primary-key db-connection (name (:table-name clause)))
 			    (name (:column-name clause))
@@ -274,11 +285,9 @@
 		    (do
 		      (raise err/SchemaWarningTableNoExist
 			     (as-str related-table-name)
-			     (join-as-str " " "Relation intermediary table (for"
-					      table-name
-					      "->"
-					      related-table-name
-					      ") not found on host/db, will attempt to create it"))
+			     (join-as-str " " "Relation intermediary table"
+					      (as-str "(" table-name "->" related-table-name ")")
+					      "not found on host/db, will attempt to create it"))
 		      (apply create-table db-connection-spec relation-table-name relation-table-columns))))))))
 	db)
     (handle err/SchemaWarning [] (continue-with nil)) ;; NOTE: Logging behaviour is handled in the SchemaError/Warning def
@@ -291,5 +300,7 @@
     (do
       (if (nil? schema-file)
 	(println "Slurm command-line utility used to verify and initialize schema definition.\nUsage: java -jar slurm.jar <schema-filename>")
-	(let [db (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e))))]
-	  (println "Database schema successfully initialized"))))))
+	(let [db      (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e))))
+	      slurmdb (SlurmDB. db)]
+	  (do
+	    (println "Database schema successfully initialized")))))))

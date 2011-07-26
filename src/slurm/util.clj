@@ -1,8 +1,8 @@
 (ns slurm.util
   (:require [clojure.contrib.sql    :as sql]
 	    [slurm.error            :as err])
-  (:use     [clojure.contrib.error-kit]
-	    [clojure.contrib.string :only (join substring? lower-case as-str)]))
+  (:use     [clojure.contrib.error-kit :only (with-handler handle raise)]
+	    [clojure.contrib.string    :only (join substring? lower-case as-str)]))
 
 (defn exists-db?
   "Checks that a given DB exists on the host"
@@ -80,9 +80,11 @@
 (defn dump-load-graph [] ())
 
 (defn escape-field-value [value column-type]
-  (if (substring? "varchar" (lower-case (name column-type)))
-    (str "\"" value "\"")
-    value))
+  (if (nil? value)
+    0
+    (if (substring? "varchar" (lower-case (name column-type)))
+      (str "\"" value "\"")
+      value)))
 
 (defn join-as-str [separator & coll]
   (join separator (map as-str coll)))
