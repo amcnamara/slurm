@@ -100,13 +100,13 @@
 		     columns     (into columns
 				       (for [[key value] columns] ;; Grab single relations and inject them back into the DBObject columns
 					 (if (contains? (set (.get-table-one-relations db-connection table-name)) (keyword key))
-					   [key (select-db-record db-connection
-								  (.get-table-field-type db-connection table-name key)
-								  (.get-table-primary-key db-connection (.get-table-field-type db-connection table-name key))
-								  (.get-table-primary-key db-connection (.get-table-field-type db-connection table-name key))
-								  (.get-table-primary-key-type db-connection (.get-table-field-type db-connection table-name key))
-								  :=
-								  value)])))]
+					   [key (first (select-db-record db-connection
+									 (.get-table-field-type db-connection table-name key)
+									 (.get-table-primary-key db-connection (.get-table-field-type db-connection table-name key))
+									 (.get-table-primary-key db-connection (.get-table-field-type db-connection table-name key))
+									 (.get-table-primary-key-type db-connection (.get-table-field-type db-connection table-name key))
+									 :=
+									 value))])))]
 		 (DBObject. (keyword table-name) primary-key columns)))))))
 
 ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
