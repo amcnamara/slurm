@@ -72,7 +72,7 @@
   IDBRecord
   (field  [this column-name]
 	  (if (and (contains? (set (.get-table-one-relations (:dbconnection (meta this)) table-name)) (keyword column-name))
-		   (not (instance? DBObject (get columns (keyword column-name)))))
+		   (not (instance? (type this) (get columns (keyword column-name)))))
 	    (first (select-db-record (:dbconnection (meta this))
 				     (.get-table-field-type       (:dbconnection (meta this)) table-name column-name)
 				     (.get-table-primary-key      (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
@@ -191,11 +191,12 @@
 			    (:primary-key dbobject)
 			    (:columns dbobject)))
   (delete [_ dbobject]
+	  (println dbobject)
 	  (delete-db-record (:spec dbconnection)
 			    (name (:table-name dbobject))
 			    (.get-table-primary-key dbconnection (name (:table-name dbobject)))
 			    (.get-table-primary-key-type dbconnection (name (:table-name dbobject)))
-			    (get (:columns dbobject) (keyword (.get-table-primary-key dbconnection (name (:table-name dbobject))))))))
+			    (:primary-key dbobject))))
 
 ;; DB Interface (direct access)
 (defprotocol IDBAccess
