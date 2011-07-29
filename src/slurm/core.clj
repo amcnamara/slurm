@@ -9,19 +9,19 @@
 ;; DB Access Objects
 (defprotocol IDBInfo
   "General info on the DBConnection, common data requests on schema and objects"
-  (get-db-loading             [#^DBConnection db-connection])
-  (get-table-names            [#^DBConnection db-connection])
-  (get-table                  [#^DBConnection db-connection table-name])
-  (get-table-primary-key      [#^DBConnection db-connection table-name])
-  (get-table-primary-key-type [#^DBConnection db-connection table-name])
-  (get-table-primary-key-auto [#^DBConnection db-connection table-name])
-  (get-table-schema           [#^DBConnection db-connection table-name])
-  (get-table-fields           [#^DBConnection db-connection table-name])
-  (get-table-field-type       [#^DBConnection db-connection table-name field-name])
-  (get-table-field-load       [#^DBConnection db-connection table-name field-name])
-  (get-table-relations        [#^DBConnection db-connection table-name])
-  (get-table-one-relations    [#^DBConnection db-connection table-name])
-  (get-table-many-relations   [#^DBConnection db-connection table-name]))
+  (get-db-loading             [#^DBConnection dbconnection])
+  (get-table-names            [#^DBConnection dbconnection])
+  (get-table                  [#^DBConnection dbconnection table-name])
+  (get-table-primary-key      [#^DBConnection dbconnection table-name])
+  (get-table-primary-key-type [#^DBConnection dbconnection table-name])
+  (get-table-primary-key-auto [#^DBConnection dbconnection table-name])
+  (get-table-schema           [#^DBConnection dbconnection table-name])
+  (get-table-fields           [#^DBConnection dbconnection table-name])
+  (get-table-field-type       [#^DBConnection dbconnection table-name field-name])
+  (get-table-field-load       [#^DBConnection dbconnection table-name field-name])
+  (get-table-relations        [#^DBConnection dbconnection table-name])
+  (get-table-one-relations    [#^DBConnection dbconnection table-name])
+  (get-table-many-relations   [#^DBConnection dbconnection table-name]))
 
 ;; Functions for returning common introspection data on schema and load-graph
 ;; TODO: Get the load graph sorted out
@@ -94,17 +94,17 @@
 ;; Record Operations
 ;; TODO: recursively insert relations, adding the returned DBObject to the parent relation key
 ;; TODO: this is a sketchy way to pull the pk on the return object, refactor this.
-(defn- insert-db-record [db-connection table-name record]
-  (sql/with-connection (:spec db-connection)
+(defn- insert-db-record [dbconnection table-name record]
+  (sql/with-connection (:spec dbconnection)
     (sql/transaction
      (let [record (reduce into ;; Remove any columns that aren't in the schema definition
 			  (map #(if (not (nil? (record %)))
 				  (hash-map % (record %)))
-			       (.get-table-fields db-connection table-name)))
+			       (.get-table-fields dbconnection table-name)))
 	   record* (into record ;; Find single relations and load their primary key into the record
 			 (reduce into
 				 (for [[key value] record]
-				   (if (and (contains? (set (.get-table-one-relations db-connection table-name)) (keyword key))
+				   (if (and (contains? (set (.get-table-one-relations dbconnection table-name)) (keyword key))
 					    (instance? DBObject value))
 				     (hash-map (keyword key) (:primary-key value))))))]
        (sql/insert-records table-name record*)
@@ -112,9 +112,9 @@
 	 ;; NOTE: this should return independently on each connection/transaction, races shouldn't be an issue (must verify this)
 	 ["SELECT LAST_INSERT_ID()"]
 	 ;; NOTE: Original record map still contains foreign objects instead of foreign primary keys for single relations
-	 (with-meta (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record)) {:dbconnection db-connection})))))) 
-(defn- select-db-record [db-connection table-name table-primary-key column-name column-type operator value]
-  (sql/with-connection (:spec db-connection)
+	 (with-meta (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record)) {:dbconnection dbconnection})))))) 
+(defn- select-db-record [dbconnection table-name table-primary-key column-name column-type operator value]
+  (sql/with-connection (:spec dbconnection)
     (sql/with-query-results query-results
       [(join-as-str " " "SELECT * FROM"
 		        table-name
@@ -127,21 +127,21 @@
 		     columns     (dissoc (into {} result) (keyword table-primary-key))
 		     columns     (into columns
 				       (for [[key value] columns] ;; Grab single relations and inject them back into the DBObject columns
-					 (if (and (contains? (set (.get-table-one-relations db-connection table-name)) (keyword key))
-						  (= :eager (.get-db-loading db-connection)))
-					   [key (first (select-db-record db-connection
-									 (.get-table-field-type       db-connection table-name key)
-									 (.get-table-primary-key      db-connection (.get-table-field-type db-connection table-name key))
-									 (.get-table-primary-key      db-connection (.get-table-field-type db-connection table-name key))
-									 (.get-table-primary-key-type db-connection (.get-table-field-type db-connection table-name key))
+					 (if (and (contains? (set (.get-table-one-relations dbconnection table-name)) (keyword key))
+						  (= :eager (.get-db-loading dbconnection)))
+					   [key (first (select-db-record dbconnection
+									 (.get-table-field-type       dbconnection table-name key)
+									 (.get-table-primary-key      dbconnection (.get-table-field-type dbconnection table-name key))
+									 (.get-table-primary-key      dbconnection (.get-table-field-type dbconnection table-name key))
+									 (.get-table-primary-key-type dbconnection (.get-table-field-type dbconnection table-name key))
 									 :=
 									 value))])))]
-		 (with-meta (DBObject. (keyword table-name) primary-key columns) {:dbconnection db-connection})))))))
+		 (with-meta (DBObject. (keyword table-name) primary-key columns) {:dbconnection dbconnection})))))))
 
 ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
 ;; TODO: make typechecking (strings must escape!) more rigorous by comparing with schema instead of value (consider making this a helper)
-(defn- update-db-record [db-connection-spec table-name primary-key primary-key-type primary-key-value columns]
-  (sql/with-connection db-connection-spec
+(defn- update-db-record [dbconnection table-name primary-key primary-key-type primary-key-value columns]
+  (sql/with-connection (:spec dbconnection)
     (sql/do-commands (join-as-str " " "UPDATE"
 				      table-name
 				      "SET"
@@ -156,8 +156,8 @@
 				      (escape-field-value primary-key-value primary-key-type)))))
 
 ;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
-(defn- delete-db-record [db-connection-spec table-name primary-key primary-key-type primary-key-value]
-  (sql/with-connection db-connection-spec
+(defn- delete-db-record [dbconnection table-name primary-key primary-key-type primary-key-value]
+  (sql/with-connection (:spec dbconnection)
     (sql/do-commands (join-as-str " " "DELETE FROM"
 				      table-name
 				      "WHERE"
@@ -189,14 +189,14 @@
 			    (name (or (:operator dbclause) :=))
 			    (:value dbclause)))
   (update [_ dbobject]
-	  (update-db-record (:spec dbconnection)
+	  (update-db-record dbconnection
 			    (name (:table-name dbobject))
 			    (.get-table-primary-key dbconnection (name (:table-name dbobject)))
 			    (.get-table-primary-key-type dbconnection (name (:table-name dbobject)))
 			    (:primary-key dbobject)
 			    (:columns dbobject)))
   (delete [_ dbobject]
-	  (delete-db-record (:spec dbconnection)
+	  (delete-db-record dbconnection
 			    (name (:table-name dbobject))
 			    (.get-table-primary-key dbconnection (name (:table-name dbobject)))
 			    (.get-table-primary-key-type dbconnection (name (:table-name dbobject)))
@@ -208,20 +208,18 @@
   (query   [#^DBConnection DB query])
   (command [#^DBConnection DB command]))
 
-(defrecord DB [#^DBConnection db-connection]
+(defrecord DB [#^DBConnection dbconnection]
   IDBAccess
   (query [_ query]
-	 (let [db-connection-spec (:spec db-connection)]
-	   (sql/with-connection db-connection-spec
-	     (sql/with-query-results query-results
-	       [query]
-	       (doall(
-		(for [result query-results]
-		  result)))))))
+	 (sql/with-connection (:spec dbconnection)
+	   (sql/with-query-results query-results
+	     [query]
+	     (doall
+	      (for [result query-results]
+		result)))))
   (command [_ command]
-	   (let [db-connection-spec (:spec db-connection)]
-	     (sql/with-connection db-connection-spec
-	       (sql/do-commands command)))))
+	   (sql/with-connection (:spec dbconnection)
+	     (sql/do-commands command))))
   
 ;; Initialization and Verification
 ;; TODO: support server pools at some point, for now just grab a single hostname
