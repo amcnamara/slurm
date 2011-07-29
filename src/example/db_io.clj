@@ -18,7 +18,9 @@
 	my-user    (slurm/.create orm (DBConstruct. :student
 						   {:name    "Alex McNamara"
 						    :address my-address}))]
-    (println my-user)                         ;; Notice that the address field is lazy loaded
-    (println (slurm/.field my-user :address)) ;; Fetching the field will load the foreign dbobject
-    (slurm/.delete orm my-address)            ;; Remove the records from the DB
+    (println (slurm/.fetch orm (DBClause. :student :name := "Alex McNamara"))) ;; Clauses will fetch seqs of valid dbobject records
+                                                                               ;; NOTE: Try changing the :loading value in db-schema from :eager to :lazy
+                                                                               ;;       and see the difference it has on fetches.
+    (println (slurm/.field my-user :address))                                  ;; Fetching the field will load the foreign dbobject if needed (ie. if lazy)
+    (slurm/.delete orm my-address)                                             ;; Remove the records from the DB
     (slurm/.delete orm my-user)))

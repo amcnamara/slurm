@@ -1,6 +1,6 @@
 {:db-port 3306
  :db-user "root"
- :loading :usage
+ :loading :eager
  :tables #{{:name    :student
 	    :fields {:name        "varchar(64)"
 		     :courses     :*course

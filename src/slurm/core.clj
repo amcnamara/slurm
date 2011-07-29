@@ -9,6 +9,7 @@
 ;; DB Access Objects
 (defprotocol IDBInfo
   "General info on the DBConnection, common data requests on schema and objects"
+  (get-db-loading             [#^DBConnection db-connection])
   (get-table-names            [#^DBConnection db-connection])
   (get-table                  [#^DBConnection db-connection table-name])
   (get-table-primary-key      [#^DBConnection db-connection table-name])
@@ -26,6 +27,8 @@
 ;; TODO: Get the load graph sorted out
 (defrecord DBConnection [spec schema load-graph]
   IDBInfo
+  (get-db-loading             [this]
+			      (get schema :loading :lazy))
   (get-table-names            [_]
 			      (map #(as-str (:name %)) (:tables schema)))
   (get-table                  [_ table-name]
@@ -94,21 +97,22 @@
 (defn- insert-db-record [db-connection table-name record]
   (sql/with-connection (:spec db-connection)
     (sql/transaction
-     (let [record (into record
-			(reduce into
-				(for [[key value] record]
-				  (if (and (contains? (set (.get-table-one-relations db-connection table-name)) (keyword key))
-					   (instance? DBObject value))
-				    (hash-map (keyword key) (:primary-key value))))))
-	   record (reduce into
+     (let [record (reduce into ;; Remove any columns that aren't in the schema definition
 			  (map #(if (not (nil? (record %)))
 				  (hash-map % (record %)))
-			       (.get-table-fields db-connection table-name)))]
-       (sql/insert-records table-name record)
+			       (.get-table-fields db-connection table-name)))
+	   record* (into record ;; Find single relations and load their primary key into the record
+			 (reduce into
+				 (for [[key value] record]
+				   (if (and (contains? (set (.get-table-one-relations db-connection table-name)) (keyword key))
+					    (instance? DBObject value))
+				     (hash-map (keyword key) (:primary-key value))))))]
+       (sql/insert-records table-name record*)
        (sql/with-query-results query-results
-	 ["SELECT LAST_INSERT_ID()"] ;; NOTE: this should return independently on each connection/transaction, races shouldn't be an issue (must verify this)
-	 (with-meta (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record)) {:dbconnection db-connection}))))))
-
+	 ;; NOTE: this should return independently on each connection/transaction, races shouldn't be an issue (must verify this)
+	 ["SELECT LAST_INSERT_ID()"]
+	 ;; NOTE: Original record map still contains foreign objects instead of foreign primary keys for single relations
+	 (with-meta (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record)) {:dbconnection db-connection})))))) 
 (defn- select-db-record [db-connection table-name table-primary-key column-name column-type operator value]
   (sql/with-connection (:spec db-connection)
     (sql/with-query-results query-results
@@ -123,7 +127,8 @@
 		     columns     (dissoc (into {} result) (keyword table-primary-key))
 		     columns     (into columns
 				       (for [[key value] columns] ;; Grab single relations and inject them back into the DBObject columns
-					 (if (contains? (set (.get-table-one-relations db-connection table-name)) (keyword key))
+					 (if (and (contains? (set (.get-table-one-relations db-connection table-name)) (keyword key))
+						  (= :eager (.get-db-loading db-connection)))
 					   [key (first (select-db-record db-connection
 									 (.get-table-field-type       db-connection table-name key)
 									 (.get-table-primary-key      db-connection (.get-table-field-type db-connection table-name key))

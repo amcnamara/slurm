@@ -18,4 +18,4 @@ Slurm is in active development, and changing often.  Again, not recommended for 
 lein compile
 lein run
 
->> this will automaticall run the code under example/db_io.clj
+>> this will automatically run the code under example/db_io.clj
