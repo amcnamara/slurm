@@ -4,4 +4,4 @@
                      [org.clojure/clojure-contrib "1.2.0"]
 		     [com.mysql/connectorj        "5.1.12"]]
   :dev-dependencies [[leiningen/lein-swank        "1.2.0-SNAPSHOT"]]
-  :main example.insert)
+  :main example.db_io)

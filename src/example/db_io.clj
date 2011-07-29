@@ -1,4 +1,4 @@
-(ns example.insert
+(ns example.db_io
   (:require [slurm.core :as slurm])
   (:import  [slurm.core DBConstruct DBObject DBClause]))
 

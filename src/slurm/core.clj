@@ -191,7 +191,6 @@
 			    (:primary-key dbobject)
 			    (:columns dbobject)))
   (delete [_ dbobject]
-	  (println dbobject)
 	  (delete-db-record (:spec dbconnection)
 			    (name (:table-name dbobject))
 			    (.get-table-primary-key dbconnection (name (:table-name dbobject)))

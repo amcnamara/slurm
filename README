@@ -12,3 +12,10 @@ Slurm is a clojure ORM, with some interesting features:
 - Support for server pools, allowing seamless scaling and optimization of schemas if needed
 
 Slurm is in active development, and changing often.  Again, not recommended for production environments -- yet.
+
+--------------------
+
+lein compile
+lein run
+
+>> this will automaticall run the code under example/db_io.clj
