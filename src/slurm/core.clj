@@ -58,16 +58,30 @@
 			      (keys (filter #(= \* (first (apply name (rest %))))
 					    (filter #(apply keyword? (rest %)) (.get-table-schema this table-name))))))
 
+(declare insert-db-record
+	 select-db-record
+	 update-db-record
+	 delete-db-record)
+
 (defprotocol IDBRecord
   "Simple accessor for DBObjects, returns a column or relation object (loads if applicable/needed), and manages the access graph"
-  (field  [#^DBObject object column-name])
-  (assoc* [#^DBObject object new-columns]))
+  (field  [#^DBObject dbobject column-name])
+  (assoc* [#^DBObject dbobject new-columns]))
 
 (defrecord DBObject [table-name primary-key columns]
   IDBRecord
-  (field  [_ column-name]
-	  (get columns (keyword column-name))) ;; TODO: lazies should return a clause, then load and return result on fetch
-  (assoc* [_ new-columns]
+  (field  [this column-name]
+	  (if (and (contains? (set (.get-table-one-relations (:dbconnection (meta this)) table-name)) (keyword column-name))
+		   (not (instance? DBObject (get columns (keyword column-name)))))
+	    (first (select-db-record (:dbconnection (meta this))
+				     (.get-table-field-type       (:dbconnection (meta this)) table-name column-name)
+				     (.get-table-primary-key      (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+				     (.get-table-primary-key      (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+				     (.get-table-primary-key-type (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+				     :=
+				     (get columns (keyword column-name))))
+	    (get columns (keyword column-name))))
+  (assoc* [this new-columns]
 	  (DBObject. table-name primary-key (into columns new-columns))))
 
 (defrecord DBConstruct [table-name columns])
@@ -77,13 +91,23 @@
 ;; Record Operations
 ;; TODO: recursively insert relations, adding the returned DBObject to the parent relation key
 ;; TODO: this is a sketchy way to pull the pk on the return object, refactor this.
-(defn- insert-db-record [db-connection-spec table-name record]
-  (sql/with-connection db-connection-spec
+(defn- insert-db-record [db-connection table-name record]
+  (sql/with-connection (:spec db-connection)
     (sql/transaction
-     (sql/insert-records table-name record)
-     (sql/with-query-results query-results
-       ["SELECT LAST_INSERT_ID()"] ;; NOTE: this should return independently on each connection/transaction, races shouldn't be an issue (must verify this)
-       (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record))))))
+     (let [record (into record
+			(reduce into
+				(for [[key value] record]
+				  (if (and (contains? (set (.get-table-one-relations db-connection table-name)) (keyword key))
+					   (instance? DBObject value))
+				    (hash-map (keyword key) (:primary-key value))))))
+	   record (reduce into
+			  (map #(if (not (nil? (record %)))
+				  (hash-map % (record %)))
+			       (.get-table-fields db-connection table-name)))]
+       (sql/insert-records table-name record)
+       (sql/with-query-results query-results
+	 ["SELECT LAST_INSERT_ID()"] ;; NOTE: this should return independently on each connection/transaction, races shouldn't be an issue (must verify this)
+	 (with-meta (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record)) {:dbconnection db-connection}))))))
 
 (defn- select-db-record [db-connection table-name table-primary-key column-name column-type operator value]
   (sql/with-connection (:spec db-connection)
@@ -101,13 +125,13 @@
 				       (for [[key value] columns] ;; Grab single relations and inject them back into the DBObject columns
 					 (if (contains? (set (.get-table-one-relations db-connection table-name)) (keyword key))
 					   [key (first (select-db-record db-connection
-									 (.get-table-field-type db-connection table-name key)
-									 (.get-table-primary-key db-connection (.get-table-field-type db-connection table-name key))
-									 (.get-table-primary-key db-connection (.get-table-field-type db-connection table-name key))
+									 (.get-table-field-type       db-connection table-name key)
+									 (.get-table-primary-key      db-connection (.get-table-field-type db-connection table-name key))
+									 (.get-table-primary-key      db-connection (.get-table-field-type db-connection table-name key))
 									 (.get-table-primary-key-type db-connection (.get-table-field-type db-connection table-name key))
 									 :=
 									 value))])))]
-		 (DBObject. (keyword table-name) primary-key columns)))))))
+		 (with-meta (DBObject. (keyword table-name) primary-key columns) {:dbconnection db-connection})))))))
 
 ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
 ;; TODO: make typechecking (strings must escape!) more rigorous by comparing with schema instead of value (consider making this a helper)
@@ -139,39 +163,39 @@
 ;; ORM Interface (proper)
 (defprotocol ISlurm
   "Simple CRUD interface for dealing with slurm objects"
-  (create [#^DBConnection SlurmDB #^DBConstruct object])
-  (fetch  [#^DBConnection SlurmDB #^DBClause clause])
-  (update [#^DBConnection SlurmDB #^DBObject object])
-  (delete [#^DBConnection SlurmDB #^DBObject object]))
+  (create [#^SlurmDB slurmdb #^DBConstruct dbconstruct])
+  (fetch  [#^SlurmDB slurmdb #^DBClause dbclause])
+  (update [#^SlurmDB slurmdb #^DBObject dbobject])
+  (delete [#^SlurmDB slurmdb #^DBObject dbobject]))
 
 ;; TODO: Lots of error checking on this
-(defrecord SlurmDB [#^DBConnection db-connection]
+(defrecord SlurmDB [#^DBConnection dbconnection]
   ISlurm
-  (create [_ object]
-	  (insert-db-record (:spec db-connection)
-			    (name (:table-name object))
-			    (:columns object)))
-  (fetch  [_ clause]
-	  (select-db-record db-connection
-			    (name (:table-name clause))
-			    (.get-table-primary-key db-connection (name (:table-name clause)))
-			    (name (:column-name clause))
-			    (.get-table-field-type db-connection (name (:table-name clause)) (name (:column-name clause)))
-			    (name (or (:operator clause) :=))
-			    (:value clause)))
-  (update [_ object]
-	  (update-db-record (:spec db-connection)
-			    (name (:table-name object))
-			    (.get-table-primary-key db-connection (name (:table-name object)))
-			    (.get-table-primary-key-type db-connection (name (:table-name object)))
-			    (:primary-key object)
-			    (:columns object)))
-  (delete [_ object]
-	  (delete-db-record (:spec db-connection)
-			    (name (:table-name object))
-			    (.get-table-primary-key db-connection (name (:table-name object)))
-			    (.get-table-primary-key-type db-connection (name (:table-name object)))
-			    (get (:columns object) (keyword (.get-table-primary-key db-connection (name (:table-name object))))))))
+  (create [_ dbconstruct]
+	  (insert-db-record dbconnection
+			    (name (:table-name dbconstruct))
+			    (:columns dbconstruct)))
+  (fetch  [_ dbclause]
+	  (select-db-record dbconnection
+			    (name (:table-name dbclause))
+			    (.get-table-primary-key dbconnection (name (:table-name dbclause)))
+			    (name (:column-name dbclause))
+			    (.get-table-field-type dbconnection (name (:table-name dbclause)) (name (:column-name dbclause)))
+			    (name (or (:operator dbclause) :=))
+			    (:value dbclause)))
+  (update [_ dbobject]
+	  (update-db-record (:spec dbconnection)
+			    (name (:table-name dbobject))
+			    (.get-table-primary-key dbconnection (name (:table-name dbobject)))
+			    (.get-table-primary-key-type dbconnection (name (:table-name dbobject)))
+			    (:primary-key dbobject)
+			    (:columns dbobject)))
+  (delete [_ dbobject]
+	  (delete-db-record (:spec dbconnection)
+			    (name (:table-name dbobject))
+			    (.get-table-primary-key dbconnection (name (:table-name dbobject)))
+			    (.get-table-primary-key-type dbconnection (name (:table-name dbobject)))
+			    (get (:columns dbobject) (keyword (.get-table-primary-key dbconnection (name (:table-name dbobject))))))))
 
 ;; DB Interface (direct access)
 (defprotocol IDBAccess
@@ -186,9 +210,9 @@
 	   (sql/with-connection db-connection-spec
 	     (sql/with-query-results query-results
 	       [query]
-	       (doall
+	       (doall(
 		(for [result query-results]
-		  result))))))
+		  result)))))))
   (command [_ command]
 	   (let [db-connection-spec (:spec db-connection)]
 	     (sql/with-connection db-connection-spec
@@ -289,7 +313,7 @@
 					      (as-str "(" table-name "->" related-table-name ")")
 					      "not found on host/db, will attempt to create it"))
 		      (apply create-table db-connection-spec relation-table-name relation-table-columns))))))))
-	db)
+	(SlurmDB. db))
     (handle err/SchemaWarning [] (continue-with nil)) ;; NOTE: Logging behaviour is handled in the SchemaError/Warning def
     (handle err/SchemaError   [])))                   ;;       Empty handlers are to supress java exception
 
@@ -300,7 +324,6 @@
     (do
       (if (nil? schema-file)
 	(println "Slurm command-line utility used to verify and initialize schema definition.\nUsage: java -jar slurm.jar <schema-filename>")
-	(let [db      (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e))))
-	      slurmdb (SlurmDB. db)]
+	(let [orm (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e))))]
 	  (do
 	    (println "Database schema successfully initialized")))))))
