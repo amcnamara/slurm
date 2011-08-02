@@ -22,6 +22,6 @@
                                                                                ;; NOTE: Try changing the :loading value in db-schema from :eager to :lazy
                                                                                ;;       and see the difference it has on fetches.
     (println (slurm/.field  my-user :address))                                 ;; Fetching the field will load the foreign dbobject if needed (ie. if lazy)
-    (println (slurm/.assoc* my-user {:name "Stephen McNamara"}))               ;; DBObjects can be modified, returning a new DBObject and triggering db update
-    (slurm/.delete my-user)                                                    ;; Remove the records from the DB
+    (println (slurm/.assoc* my-user {:name "Anonymous User"}))                 ;; Returns a new DBObject and triggers update on DB
+    (slurm/.delete my-user)                                                    ;; Remove the objects from the DB
     (slurm/.delete my-address)))

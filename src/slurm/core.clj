@@ -153,20 +153,34 @@
 
 ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
 ;; TODO: make typechecking (strings must escape!) more rigorous by comparing with schema instead of value (consider making this a helper)
-(defn- update-db-record [dbconnection table-name primary-key primary-key-type primary-key-value columns]
-  (sql/with-connection (:spec dbconnection)
-    (sql/do-commands (join-as-str " " "UPDATE"
-				      table-name
-				      "SET"
-				      (apply (partial join-as-str ", ")
-					     (filter (complement nil?)
-						     (for [[column-name column-value] columns]
-						       (cond (string? column-value)    (as-str column-name " = \"" column-value "\"")
-							     (not (nil? column-value)) (as-str column-name " = "   column-value)))))
-				      "WHERE"
-				      primary-key
-				      "="
-				      (escape-field-value primary-key-value primary-key-type)))))
+(defn- update-db-record [dbconnection table-name table-primary-key table-primary-key-type table-primary-key-value columns]
+  (let [columns (dissoc columns (keyword table-primary-key))
+	columns (into columns
+		      (for [[key value] columns]
+			(if (and (contains? (set (.get-table-one-relations dbconnection table-name)) (keyword key))
+				 (instance? DBObject value))
+			  [key (:primary-key (first
+					      (select-db-record dbconnection
+								(.get-table-field-type       dbconnection table-name key)
+								(.get-table-primary-key      dbconnection (.get-table-field-type dbconnection table-name key))
+								(.get-table-primary-key      dbconnection (.get-table-field-type dbconnection table-name key))
+								(.get-table-primary-key-type dbconnection (.get-table-field-type dbconnection table-name key))
+								:=
+								(:primary-key value))))])))
+        columns (apply (partial join-as-str ", ")
+		       (filter (complement nil?)
+			       (for [[column-name column-value] columns]
+				 (cond (string? column-value)    (as-str column-name " = \"" column-value "\"")
+				       (not (nil? column-value)) (as-str column-name " = "   column-value)))))]
+    (sql/with-connection (:spec dbconnection)
+      (sql/do-commands (join-as-str " " "UPDATE"
+				        table-name
+					"SET"
+				        columns
+					"WHERE"
+					table-primary-key
+					"="
+					(escape-field-value table-primary-key-value table-primary-key-type))))))
 		     
 ;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
 (defn- delete-db-record [dbconnection table-name primary-key primary-key-type primary-key-value]
