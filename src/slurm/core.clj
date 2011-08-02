@@ -69,7 +69,8 @@
 (defprotocol IDBRecord
   "Simple accessor for DBObjects, returns a column or relation object (loads if applicable/needed), and manages the access graph"
   (field  [#^DBObject dbobject column-name])
-  (assoc* [#^DBObject dbobject new-columns]))
+  (assoc* [#^DBObject dbobject new-columns])
+  (delete [#^DBObject dbobject]))
 
 (defrecord DBObject [table-name primary-key columns]
   IDBRecord
@@ -85,7 +86,19 @@
 				     (get columns (keyword column-name))))
 	    (get columns (keyword column-name))))
   (assoc* [this new-columns]
-	  (DBObject. table-name primary-key (into columns new-columns))))
+	  (update-db-record (:dbconnection (meta this))
+			    table-name
+			    (.get-table-primary-key (:dbconnection (meta this)) table-name)
+			    (.get-table-primary-key-type (:dbconnection (meta this)) table-name)
+			    primary-key
+			    new-columns)
+	  (DBObject. table-name primary-key (into columns new-columns)))
+  (delete [this]
+	  (delete-db-record (:dbconnection (meta this))
+			    table-name
+			    (.get-table-primary-key (:dbconnection (meta this)) table-name)
+			    (.get-table-primary-key-type (:dbconnection (meta this)) table-name)
+			    primary-key)))
 
 (defrecord DBConstruct [table-name columns])
 
@@ -145,16 +158,16 @@
     (sql/do-commands (join-as-str " " "UPDATE"
 				      table-name
 				      "SET"
-				      (join-as-str ", "
-						   (filter (complement nil?)
-							   (for [[column-name column-value] columns]
-							     (cond (string? column-value)    (str (name column-name) " = \"" column-value "\"")
-								   (not (nil? column-value)) (str (name column-name) " = "   column-value)))))
+				      (apply (partial join-as-str ", ")
+					     (filter (complement nil?)
+						     (for [[column-name column-value] columns]
+						       (cond (string? column-value)    (as-str column-name " = \"" column-value "\"")
+							     (not (nil? column-value)) (as-str column-name " = "   column-value)))))
 				      "WHERE"
 				      primary-key
 				      "="
 				      (escape-field-value primary-key-value primary-key-type)))))
-
+		     
 ;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
 (defn- delete-db-record [dbconnection table-name primary-key primary-key-type primary-key-value]
   (sql/with-connection (:spec dbconnection)
@@ -169,9 +182,7 @@
 (defprotocol ISlurm
   "Simple CRUD interface for dealing with slurm objects"
   (create [#^SlurmDB slurmdb #^DBConstruct dbconstruct])
-  (fetch  [#^SlurmDB slurmdb #^DBClause dbclause])
-  (update [#^SlurmDB slurmdb #^DBObject dbobject])
-  (delete [#^SlurmDB slurmdb #^DBObject dbobject]))
+  (fetch  [#^SlurmDB slurmdb #^DBClause dbclause]))
 
 ;; TODO: Lots of error checking on this
 (defrecord SlurmDB [#^DBConnection dbconnection]
@@ -187,20 +198,7 @@
 			    (name (:column-name dbclause))
 			    (.get-table-field-type dbconnection (name (:table-name dbclause)) (name (:column-name dbclause)))
 			    (name (or (:operator dbclause) :=))
-			    (:value dbclause)))
-  (update [_ dbobject]
-	  (update-db-record dbconnection
-			    (name (:table-name dbobject))
-			    (.get-table-primary-key dbconnection (name (:table-name dbobject)))
-			    (.get-table-primary-key-type dbconnection (name (:table-name dbobject)))
-			    (:primary-key dbobject)
-			    (:columns dbobject)))
-  (delete [_ dbobject]
-	  (delete-db-record dbconnection
-			    (name (:table-name dbobject))
-			    (.get-table-primary-key dbconnection (name (:table-name dbobject)))
-			    (.get-table-primary-key-type dbconnection (name (:table-name dbobject)))
-			    (:primary-key dbobject))))
+			    (:value dbclause))))
 
 ;; DB Interface (direct access)
 (defprotocol IDBAccess

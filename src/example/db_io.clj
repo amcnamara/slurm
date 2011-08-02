@@ -21,6 +21,7 @@
     (println (slurm/.fetch orm (DBClause. :student :name := "Alex McNamara"))) ;; Clauses will fetch seqs of valid dbobject records
                                                                                ;; NOTE: Try changing the :loading value in db-schema from :eager to :lazy
                                                                                ;;       and see the difference it has on fetches.
-    (println (slurm/.field my-user :address))                                  ;; Fetching the field will load the foreign dbobject if needed (ie. if lazy)
-    (slurm/.delete orm my-address)                                             ;; Remove the records from the DB
-    (slurm/.delete orm my-user)))
+    (println (slurm/.field  my-user :address))                                 ;; Fetching the field will load the foreign dbobject if needed (ie. if lazy)
+    (println (slurm/.assoc* my-user {:name "Stephen McNamara"}))               ;; DBObjects can be modified, returning a new DBObject and triggering db update
+    (slurm/.delete my-user)                                                    ;; Remove the records from the DB
+    (slurm/.delete my-address)))
