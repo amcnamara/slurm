@@ -75,16 +75,36 @@
 (defrecord DBObject [table-name primary-key columns]
   IDBRecord
   (field  [this column-name]
-	  (if (and (contains? (set (.get-table-one-relations (:dbconnection (meta this)) table-name)) (keyword column-name))
-		   (not (instance? (type this) (get columns (keyword column-name)))))
-	    (first (select-db-record (:dbconnection (meta this))
-				     (.get-table-field-type       (:dbconnection (meta this)) table-name column-name)
-				     (.get-table-primary-key      (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
-				     (.get-table-primary-key      (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
-				     (.get-table-primary-key-type (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
-				     :=
-				     (get columns (keyword column-name))))
-	    (get columns (keyword column-name))))
+	  (cond ;; Grab a single-relation field
+	        (and (contains? (set (.get-table-one-relations (:dbconnection (meta this)) table-name)) (keyword column-name))
+		     (not (instance? (type this) (get columns (keyword column-name)))))
+		(first (select-db-record (:dbconnection (meta this))
+					 (.get-table-field-type       (:dbconnection (meta this)) table-name column-name)
+					 (.get-table-primary-key      (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+					 (.get-table-primary-key      (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+					 (.get-table-primary-key-type (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+					 :=
+					 (get columns (keyword column-name))))
+		;; Grab a multi-relation field
+		(contains? (set (.get-table-many-relations (:dbconnection (meta this)) table-name)) (keyword column-name))
+		(for [foreign-key (map :primary-key
+				      (select-db-record (:dbconnection (meta this))
+							(generate-relation-table-name table-name (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+							:id
+							(generate-relation-key-name table-name (.get-table-primary-key (:dbconnection (meta this)) table-name))
+							(.get-table-primary-key-type (:dbconnection (meta this))
+										     (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+							:=
+							primary-key))]
+		  (first (select-db-record (:dbconnection (meta this))
+					   (.get-table-field-type       (:dbconnection (meta this)) table-name column-name)
+					   (.get-table-primary-key      (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+					   (.get-table-primary-key      (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+					   (.get-table-primary-key-type (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+					   :=
+					   foreign-key)))
+		;; Grab a non-relation field
+		:else (get columns (keyword column-name))))
   (assoc* [this new-columns]
 	  (update-db-record (:dbconnection (meta this))
 			    table-name
@@ -110,10 +130,10 @@
 (defn- insert-db-record [dbconnection table-name record]
   (sql/with-connection (:spec dbconnection)
     (sql/transaction
-     (let [record (reduce into ;; Remove any columns that aren't in the schema definition
-			  (map #(if (not (nil? (record %)))
-				  (hash-map % (record %)))
-			       (.get-table-fields dbconnection table-name)))
+     (let [record  (reduce into ;; Remove any columns that aren't in the schema definition
+			   (map #(if (not (nil? (record %)))
+				   (hash-map % (record %)))
+				(.get-table-fields dbconnection table-name)))
 	   record* (into record ;; Find single relations and load their primary key into the record
 			 (reduce into
 				 (for [[key value] record]
