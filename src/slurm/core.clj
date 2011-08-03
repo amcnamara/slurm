@@ -162,16 +162,12 @@
 			(escape-field-value value column-type))]
       (doall (for [result query-results]
 	       (let [primary-key (get result (keyword table-primary-key) "NULL") ;; TODO: fire off a warning on no PK
-		     columns     (dissoc (into {} result) (keyword table-primary-key))
-		     dbobject    (with-meta (DBObject. (keyword table-name) primary-key columns) {:dbconnection dbconnection})
-		                 ;; Grab relations and inject them back into the DBObject columns
+		     base-dbo    (with-meta (DBObject. (keyword table-name) primary-key (dissoc (into {} result) (keyword table-primary-key))) {:dbconnection dbconnection})
 		     relations   (if (= :eager (.get-db-loading dbconnection))
 				   (for [relation (.get-table-relations dbconnection table-name)]
-				     [relation (.field dbobject relation)]))
-		     dbobject    (if (not-empty relations)
-				   (with-meta (DBObject. (keyword table-name) primary-key (into columns relations)) dbobject)
-				   dbobject)]
-		 dbobject))))))
+				     [relation (.field base-dbo relation)]))]
+		 ;; Inject relation objects (if applicable) into the DBO
+		 (into base-dbo (into (:columns base-dbo) relations))))))))
 		   
 ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
 ;; TODO: make typechecking (strings must escape!) more rigorous by comparing with schema instead of value (consider making this a helper)
