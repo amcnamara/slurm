@@ -6,6 +6,12 @@
 	    [slurm.util])
   (:gen-class))
 
+;; Forward Declarations
+(declare insert-db-record
+	 select-db-record
+	 update-db-record
+	 delete-db-record)
+
 ;; DB Access Objects
 (defprotocol IDBInfo
   "General info on the DBConnection, common data requests on schema and objects"
@@ -61,11 +67,6 @@
 			      (keys (filter #(= \* (first (apply name (rest %))))
 					    (filter #(apply keyword? (rest %)) (.get-table-schema this table-name))))))
 
-(declare insert-db-record
-	 select-db-record
-	 update-db-record
-	 delete-db-record)
-
 (defprotocol IDBRecord
   "Simple accessor for DBObjects, returns a column or relation object (loads if applicable/needed), and manages the access graph"
   (field  [#^DBObject dbobject column-name])
@@ -74,6 +75,7 @@
 
 (defrecord DBObject [table-name primary-key columns]
   IDBRecord
+  ;; TODO: Multi-relation fields should fetch with joins, current implementation in inefficient
   (field  [this column-name]
 	  (cond ;; Grab a single-relation field
 	        (and (contains? (set (.get-table-one-relations (:dbconnection (meta this)) table-name)) (keyword column-name))
@@ -91,9 +93,8 @@
 				       (select-db-record (:dbconnection (meta this))
 							 (generate-relation-table-name table-name (.get-table-field-type  (:dbconnection (meta this)) table-name column-name))
 							 :id
-							 (generate-relation-key-name table-name   (.get-table-primary-key (:dbconnection (meta this)) table-name))
-							 (.get-table-primary-key-type (:dbconnection (meta this))
-										      (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+							 (generate-relation-key-name   table-name (.get-table-primary-key (:dbconnection (meta this)) table-name))
+							 (.get-table-primary-key-type  (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
 							 :=
 							 primary-key))]
 		  (first (select-db-record (:dbconnection (meta this))
@@ -106,14 +107,12 @@
 		;; Grab a non-relation field
 		:else (get columns (keyword column-name))))
   (assoc* [this new-columns]
-	  (println this ">>" columns)
-	  (println (.get-table-relations (:dbconnection (meta this)) table-name))
 	  (if (empty new-columns)
 	    this
 	    (do
 	      (update-db-record (:dbconnection (meta this))
 				table-name
-				(.get-table-primary-key (:dbconnection (meta this)) table-name)
+				(.get-table-primary-key      (:dbconnection (meta this)) table-name)
 				(.get-table-primary-key-type (:dbconnection (meta this)) table-name)
 				primary-key
 				new-columns)
@@ -121,7 +120,7 @@
   (delete [this]
 	  (delete-db-record (:dbconnection (meta this))
 			    table-name
-			    (.get-table-primary-key (:dbconnection (meta this)) table-name)
+			    (.get-table-primary-key      (:dbconnection (meta this)) table-name)
 			    (.get-table-primary-key-type (:dbconnection (meta this)) table-name)
 			    primary-key)))
 
@@ -151,6 +150,7 @@
 	 ["SELECT LAST_INSERT_ID()"]
 	 ;; NOTE: Original record map still contains foreign objects instead of foreign primary keys for single relations
 	 (with-meta (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record)) {:dbconnection dbconnection})))))) 
+
 (defn- select-db-record [dbconnection table-name table-primary-key column-name column-type operator value]
   (sql/with-connection (:spec dbconnection)
     (sql/with-query-results query-results
@@ -221,15 +221,15 @@
   ISlurm
   (create [_ dbconstruct]
 	  (insert-db-record dbconnection
-			    (name (:table-name dbconstruct))
+			    (:table-name dbconstruct)
 			    (:columns dbconstruct)))
   (fetch  [_ dbclause]
 	  (select-db-record dbconnection
-			    (name (:table-name dbclause))
+			    (:table-name dbclause)
 			    (.get-table-primary-key dbconnection (name (:table-name dbclause)))
-			    (name (:column-name dbclause))
-			    (.get-table-field-type dbconnection (name (:table-name dbclause)) (name (:column-name dbclause)))
-			    (name (or (:operator dbclause) :=))
+			    (:column-name dbclause)
+			    (.get-table-field-type dbconnection  (name (:table-name dbclause)) (name (:column-name dbclause)))
+			    (or (:operator dbclause) :=)
 			    (:value dbclause))))
 
 ;; DB Interface (direct access)
