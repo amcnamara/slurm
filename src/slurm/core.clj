@@ -88,14 +88,14 @@
 		;; Grab a multi-relation field
 		(contains? (set (.get-table-many-relations (:dbconnection (meta this)) table-name)) (keyword column-name))
 		(for [foreign-key (map :primary-key
-				      (select-db-record (:dbconnection (meta this))
-							(generate-relation-table-name table-name (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
-							:id
-							(generate-relation-key-name table-name (.get-table-primary-key (:dbconnection (meta this)) table-name))
-							(.get-table-primary-key-type (:dbconnection (meta this))
-										     (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
-							:=
-							primary-key))]
+				       (select-db-record (:dbconnection (meta this))
+							 (generate-relation-table-name table-name (.get-table-field-type  (:dbconnection (meta this)) table-name column-name))
+							 :id
+							 (generate-relation-key-name table-name   (.get-table-primary-key (:dbconnection (meta this)) table-name))
+							 (.get-table-primary-key-type (:dbconnection (meta this))
+										      (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
+							 :=
+							 primary-key))]
 		  (first (select-db-record (:dbconnection (meta this))
 					   (.get-table-field-type       (:dbconnection (meta this)) table-name column-name)
 					   (.get-table-primary-key      (:dbconnection (meta this)) (.get-table-field-type (:dbconnection (meta this)) table-name column-name))
@@ -106,13 +106,18 @@
 		;; Grab a non-relation field
 		:else (get columns (keyword column-name))))
   (assoc* [this new-columns]
-	  (update-db-record (:dbconnection (meta this))
-			    table-name
-			    (.get-table-primary-key (:dbconnection (meta this)) table-name)
-			    (.get-table-primary-key-type (:dbconnection (meta this)) table-name)
-			    primary-key
-			    new-columns)
-	  (DBObject. table-name primary-key (into columns new-columns)))
+	  (println this ">>" columns)
+	  (println (.get-table-relations (:dbconnection (meta this)) table-name))
+	  (if (empty new-columns)
+	    this
+	    (do
+	      (update-db-record (:dbconnection (meta this))
+				table-name
+				(.get-table-primary-key (:dbconnection (meta this)) table-name)
+				(.get-table-primary-key-type (:dbconnection (meta this)) table-name)
+				primary-key
+				new-columns)
+	      (DBObject. table-name primary-key (into columns new-columns)))))
   (delete [this]
 	  (delete-db-record (:dbconnection (meta this))
 			    table-name
@@ -158,19 +163,16 @@
       (doall (for [result query-results]
 	       (let [primary-key (get result (keyword table-primary-key) "NULL") ;; TODO: fire off a warning on no PK
 		     columns     (dissoc (into {} result) (keyword table-primary-key))
-		     columns     (into columns
-				       (for [[key value] columns] ;; Grab single relations and inject them back into the DBObject columns
-					 (if (and (contains? (set (.get-table-one-relations dbconnection table-name)) (keyword key))
-						  (= :eager (.get-db-loading dbconnection)))
-					   [key (first (select-db-record dbconnection
-									 (.get-table-field-type       dbconnection table-name key)
-									 (.get-table-primary-key      dbconnection (.get-table-field-type dbconnection table-name key))
-									 (.get-table-primary-key      dbconnection (.get-table-field-type dbconnection table-name key))
-									 (.get-table-primary-key-type dbconnection (.get-table-field-type dbconnection table-name key))
-									 :=
-									 value))])))]
-		 (with-meta (DBObject. (keyword table-name) primary-key columns) {:dbconnection dbconnection})))))))
-
+		     dbobject    (with-meta (DBObject. (keyword table-name) primary-key columns) {:dbconnection dbconnection})
+		                 ;; Grab relations and inject them back into the DBObject columns
+		     relations   (if (= :eager (.get-db-loading dbconnection))
+				   (for [relation (.get-table-relations dbconnection table-name)]
+				     [relation (.field dbobject relation)]))
+		     dbobject    (if (not-empty relations)
+				   (DBObject. (keyword table-name) primary-key (into columns relations))
+				   dbobject)]
+		 dbobject))))))
+		   
 ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
 ;; TODO: make typechecking (strings must escape!) more rigorous by comparing with schema instead of value (consider making this a helper)
 (defn- update-db-record [dbconnection table-name table-primary-key table-primary-key-type table-primary-key-value columns]
