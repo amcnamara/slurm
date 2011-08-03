@@ -169,7 +169,7 @@
 				   (for [relation (.get-table-relations dbconnection table-name)]
 				     [relation (.field dbobject relation)]))
 		     dbobject    (if (not-empty relations)
-				   (DBObject. (keyword table-name) primary-key (into columns relations))
+				   (with-meta (DBObject. (keyword table-name) primary-key (into columns relations)) dbobject)
 				   dbobject)]
 		 dbobject))))))
 		   
