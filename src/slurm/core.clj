@@ -49,7 +49,7 @@
   (get-table-schema           [this table-name]
 			      (-> (.get-table this table-name) :fields))
   (get-table-fields           [this table-name]
-			      (keys (.get-table-schema this table-name)))
+			      (or (keys (.get-table-schema this table-name)) []))
   (get-table-field-type       [this table-name field-name]
 			      (or (let [type (get (.get-table-schema this table-name) (keyword field-name))]
 				    (if (and (keyword? type) (= \* (first (name type))))
@@ -59,13 +59,13 @@
   (get-table-field-load       [this table-name field-name]
 			      nil)
   (get-table-relations        [this table-name]
-			      (into (.get-table-one-relations this table-name) (.get-table-many-relations this table-name)))
+			      (or (into (.get-table-one-relations this table-name) (.get-table-many-relations this table-name)) []))
   (get-table-one-relations    [this table-name]
-			      (keys (filter #(not= \* (first (apply name (rest %))))
-					    (filter #(apply keyword? (rest %)) (.get-table-schema this table-name)))))
+			      (or (keys (filter #(not= \* (first (apply name (rest %))))
+						(filter #(apply keyword? (rest %)) (.get-table-schema this table-name)))) []))
   (get-table-many-relations   [this table-name]
-			      (keys (filter #(= \* (first (apply name (rest %))))
-					    (filter #(apply keyword? (rest %)) (.get-table-schema this table-name))))))
+			      (or (keys (filter #(= \* (first (apply name (rest %))))
+						(filter #(apply keyword? (rest %)) (.get-table-schema this table-name)))) [])))
 
 (defprotocol IDBRecord
   "Simple accessor for DBObjects, returns a column or relation object (loads if applicable/needed), and manages the access graph"
@@ -132,24 +132,41 @@
 ;; TODO: recursively insert relations, adding the returned DBObject to the parent relation key
 ;; TODO: this is a sketchy way to pull the pk on the return object, refactor this.
 (defn- insert-db-record [dbconnection table-name record]
+  (println "---------" table-name "--------" record)
   (sql/with-connection (:spec dbconnection)
     (sql/transaction
-     (let [record  (reduce into ;; Remove any columns that aren't in the schema definition
-			   (map #(if (not (nil? (record %)))
-				   (hash-map % (record %)))
-				(.get-table-fields dbconnection table-name)))
-	   record* (into record ;; Find single relations and load their primary key into the record
-			 (reduce into
-				 (for [[key value] record]
-				   (if (and (contains? (set (.get-table-one-relations dbconnection table-name)) (keyword key))
-					    (instance? DBObject value))
-				     (hash-map (keyword key) (:primary-key value))))))]
-       (sql/insert-records table-name record*)
+     (let [;; Remove any columns that aren't in the schema definition
+	   columns  (try (reduce into
+				 (map #(if (not (nil? (record (keyword %))))
+					 (hash-map % (record %)))
+				      (.get-table-fields dbconnection table-name)))
+			 (catch IllegalArgumentException e record)) ;; NOTE: Breaks on multi relation tables, since those tables aren't in the schema getters
+	   ;; Find single relations and load their primary key into the record
+	   columns* (into columns
+			  (reduce into
+				  (or (for [[key value] columns]
+					(if (and (contains? (set (.get-table-one-relations dbconnection table-name)) (keyword key))
+						 (instance? DBObject value))
+					  (hash-map (keyword key) (:primary-key value)))) [])))
+	   ;; Remove the multi-relation fields from the insert set
+	   columns* (filter #(not (contains? (set (.get-table-many-relations dbconnection table-name)) (keyword (first %)))) columns*)]
+       (sql/insert-records table-name columns*)
        (sql/with-query-results query-results
 	 ;; NOTE: this should return independently on each connection/transaction, races shouldn't be an issue (must verify this)
 	 ["SELECT LAST_INSERT_ID()"]
+	 ;; Insert multi-relation records
+	 (doall
+	  (for [relation (.get-table-many-relations dbconnection table-name)]
+	    (doall
+	     (for [foreign-object (get columns relation)]
+	       (insert-db-record dbconnection
+				 (generate-relation-table-name         table-name (.get-table-field-type  dbconnection table-name   relation))
+				 (hash-map (generate-relation-key-name table-name (.get-table-primary-key dbconnection table-name))
+					   (first (apply vals query-results))
+					   (generate-relation-key-name (.get-table-field-type dbconnection table-name relation) (.get-table-primary-key dbconnection relation))
+					   (if (instance? DBObject foreign-object) (:primary-key foreign-object) foreign-object)))))))
 	 ;; NOTE: Original record map still contains foreign objects instead of foreign primary keys for single relations
-	 (with-meta (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} record)) {:dbconnection dbconnection})))))) 
+	 (with-meta (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} columns)) {:dbconnection dbconnection})))))) 
 
 (defn- select-db-record [dbconnection table-name table-primary-key column-name column-type operator value]
   (sql/with-connection (:spec dbconnection)
