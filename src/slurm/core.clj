@@ -107,7 +107,7 @@
 		;; Grab a non-relation field
 		:else (get columns (keyword column-name))))
   (assoc* [this new-columns]
-	  (if (empty new-columns)
+	  (if (empty? new-columns)
 	    this
 	    (do
 	      (update-db-record (:dbconnection (meta this))
@@ -132,7 +132,6 @@
 ;; TODO: recursively insert relations, adding the returned DBObject to the parent relation key
 ;; TODO: this is a sketchy way to pull the pk on the return object, refactor this.
 (defn- insert-db-record [dbconnection table-name record]
-  (println "---------" table-name "--------" record)
   (sql/with-connection (:spec dbconnection)
     (sql/transaction
      (let [;; Remove any columns that aren't in the schema definition
