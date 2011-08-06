@@ -17,7 +17,7 @@
 	    [request]
 	    (not (empty? query-results)))))
       (catch Exception e
-	(raise err/SchemaError e (str "Error verifying db (" (db-name) ") on host"))))
+	(raise err/SchemaError e (str "Error verifying db (" db-name ") on host"))))
     (handle err/SchemaError [])))
   
 (defn exists-table?
@@ -25,16 +25,16 @@
   [db-connection-spec root-subname db-name table-name]
   (with-handler
     (try
-      (let [db-name (name db-name)
+      (let [db-name    (name db-name)
 	    table-name (name table-name)
-	    request (str "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = \"" db-name "\" AND TABLE_NAME = \"" table-name "\"")
-	    db-root (into db-connection-spec {:subname root-subname})]
+	    request    (str "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = \"" db-name "\" AND TABLE_NAME = \"" table-name "\"")
+	    db-root    (into db-connection-spec {:subname root-subname})]
 	(sql/with-connection db-root
 	  (sql/with-query-results query-results
 	    [request]
 	    (not (empty? query-results)))))
       (catch Exception e
-	(raise err/SchemaError e (str "Error verifying table (" (name table-name) ") on host/db (" (name db-name) ")"))))
+	(raise err/SchemaError e (as-str "Error verifying table (" table-name ") on host/db (" db-name ")"))))
     (handle err/SchemaError [])))
 
 (defn create-db
@@ -48,7 +48,7 @@
 	(sql/with-connection db-root
 	  (sql/do-commands request))) ;; TODO: how to verify this worked other than not hitting an exception?
       (catch Exception e
-	(raise err/SchemaErrorBadDBName e (str "Could not create database (" (name db-name) "), probably due to a badly formed database name."))))
+	(raise err/SchemaErrorBadDBName e (as-str "Could not create database (" db-name "), probably due to a badly formed database name."))))
     (handle err/SchemaError [])))
 
 (defn create-table
@@ -59,7 +59,7 @@
       (sql/with-connection db-connection-spec
 	(apply sql/create-table table-name table-schema))
       (catch Exception e
-	(raise err/SchemaErrorBadTableName e (str "Could not create table (" (name table-name) "), probably due to a badly formed table name."))))
+	(raise err/SchemaErrorBadTableName e (as-str "Could not create table (" table-name "), probably due to a badly formed table name."))))
     (handle err/SchemaError [])))
 
 ;; TODO: use this to verify slurm schema is consistent with database schema
@@ -68,7 +68,7 @@
   "Fetches a table description, returns a seq of column-name/type pairs"
   [db-connection-spec table-name]
   (let [table-name (name table-name)
-	request (str "DESCRIBE " table-name)]
+	request    (str "DESCRIBE " table-name)]
     (try
       (sql/with-connection db-connection-spec
 	(sql/with-query-results query-results
@@ -76,7 +76,7 @@
 	  (doall (for [query-record query-results] (select-keys query-record [:field :type])))))
       (catch com.mysql.jdbc.exceptions.jdbc4.MySQLSyntaxErrorException e false)))) ;; TODO: what breaks here other than table-not-found?
 
-;; TODO: add this
+;; TODO: think about this
 (defn dump-load-graph [] ())
 
 (defn escape-field-value [value column-type]
@@ -92,21 +92,20 @@
 (defn generate-relation-table-name [table-name-from table-name-to]
   "Formats a keyword to represent a one-to-many table name from the two related tables"
   ;;used only on :many-to-many intermediate tables
-  (keyword (str (name table-name-from) (name table-name-to))))
+  (keyword (as-str table-name-from table-name-to)))
 
 (defn generate-relation-key-name [table-name primary-key-name]
   "Formats a keyword to represent a foreign key column name"
   ;;used in both :one-to-one and :one-to-many relations
-  (keyword (str (name table-name) "_" (name primary-key-name))))
+  (keyword (as-str table-name "_" primary-key-name)))
 
 (defn generate-foreign-key-constraint [key-name foreign-table-name foreign-primary-key]
-  (vector "FOREIGN KEY" (str "(" (name key-name) ")")
-	  "REFERENCES" (str (name foreign-table-name) "("
-			    (name foreign-primary-key) ")")))
+  (vector "FOREIGN KEY" (as-str "(" key-name ")")
+	  "REFERENCES"  (as-str foreign-table-name "(" foreign-primary-key ")")))
 
 (defn generate-foreign-key-constraint-cascade-delete [key-name foreign-table-name foreign-primary-key]
   (conj (generate-foreign-key-constraint key-name foreign-table-name foreign-primary-key)
-	(str "ON DELETE CASCADE")))
+	"ON DELETE CASCADE"))
 
 (def valid-schema-db-keys
   #{:db-server-pool

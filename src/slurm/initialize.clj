@@ -3,7 +3,7 @@
 	    [slurm.core])
   (:import  [slurm.core DBConnection SlurmDB])
   (:use     [clojure.contrib.error-kit :only (with-handler handle continue-with raise)]
-	    [clojure.contrib.string    :only (as-str substring? lower-case)]
+	    [clojure.contrib.string    :only (as-str)]
 	    [slurm.internal]))
 
 ;; Initialization and Verification

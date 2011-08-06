@@ -2,7 +2,7 @@
   (:require [clojure.contrib.sql :as sql]
 	    [slurm.core])
   (:import  [slurm.core DBObject])
-  (:use     [clojure.contrib.string :only (as-str substring? lower-case)]
+  (:use     [clojure.contrib.string :only (as-str)]
 	    [slurm.internal])
   (:gen-class))
 
