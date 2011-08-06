@@ -6,8 +6,7 @@
 	    [slurm.orm        SlurmDB])
   (:use     [clojure.contrib.error-kit :only (with-handler handle continue-with raise)]
 	    [clojure.contrib.string    :only (as-str)]
-	    [slurm.internal])
-  (:gen-class))
+	    [slurm.internal]))
 
 ;; Initialization and Verification
 ;; TODO: support server pools at some point, for now just grab a single hostname

@@ -3,8 +3,7 @@
 	    [clojure.contrib.sql    :as sql])
   (:import  [slurm.connection       DBConnection])
   (:use     [clojure.contrib.string :only (as-str substring? lower-case)]
-	    [slurm.internal])
-  (:gen-class))
+	    [slurm.internal]))
 
 ;; Forward declaration of record operations
 (declare insert-db-record
@@ -101,8 +100,6 @@
 			    (:value dbclause))))
 
 ;; Record Operations
-;; TODO: recursively insert relations, adding the returned DBObject to the parent relation key
-;; TODO: this is a sketchy way to pull the pk on the return object, refactor this.
 (defn- insert-db-record [dbconnection table-name record]
   (sql/with-connection (:spec dbconnection)
     (sql/transaction
