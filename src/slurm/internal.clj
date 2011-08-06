@@ -1,6 +1,6 @@
-(ns slurm.util
-  (:require [clojure.contrib.sql    :as sql]
-	    [slurm.error            :as err])
+(ns slurm.internal
+  (:require [clojure.contrib.sql :as sql]
+	    [slurm.error         :as err])
   (:use     [clojure.contrib.error-kit :only (with-handler handle raise)]
 	    [clojure.contrib.string    :only (join substring? lower-case as-str)]))
 

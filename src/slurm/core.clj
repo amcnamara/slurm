@@ -1,18 +1,14 @@
 (ns slurm.core
-  (:require [clojure.contrib.sql :as sql]
-	    [slurm.error         :as err])
-  (:use     [clojure.contrib.error-kit :only (with-handler handle continue-with raise)]
-	    [clojure.contrib.string    :only (as-str substring? lower-case)]
-	    [slurm.util])
+  (:require [slurm.initialize])
+  (:use     [clojure.contrib.string :only (as-str substring? lower-case)]
+	    [slurm.internal]
+	    [slurm.operations])
   (:gen-class))
 
-;; Forward Declarations
-(declare insert-db-record
-	 select-db-record
-	 update-db-record
-	 delete-db-record)
+;; Pull references
+(def init slurm.initialize/init)
 
-;; DB Access Objects
+;; DB Access Protocols
 (defprotocol IDBInfo
   "General info on the DBConnection, common data requests on schema and objects"
   (get-db-loading             [#^DBConnection dbconnection])
@@ -29,7 +25,7 @@
   (get-table-one-relations    [#^DBConnection dbconnection table-name])
   (get-table-many-relations   [#^DBConnection dbconnection table-name]))
 
-;; Functions for returning common introspection data on schema and load-graph
+;; Access Objects for common introspection data on schema and load-graph
 ;; TODO: Get the load graph sorted out
 (defrecord DBConnection [spec schema load-graph]
   IDBInfo
@@ -67,15 +63,17 @@
 			      (or (keys (filter #(= \* (first (apply name (rest %))))
 						(filter #(apply keyword? (rest %)) (.get-table-schema this table-name)))) [])))
 
+;; DBObject protocols (UD and field loading)
 (defprotocol IDBRecord
   "Simple accessor for DBObjects, returns a column or relation object (loads if applicable/needed), and manages the access graph"
   (field  [#^DBObject dbobject column-name])
   (assoc* [#^DBObject dbobject new-columns])
   (delete [#^DBObject dbobject]))
 
+;; Objects representing data mapping from DB rows
 (defrecord DBObject [table-name primary-key columns]
   IDBRecord
-  ;; TODO: Multi-relation fields should fetch with joins, current implementation in inefficient
+  ;; TODO: Multi-relation fields should fetch with joins, current implementation in crazy inefficient
   (field  [this column-name]
 	  (cond ;; Grab a single-relation field
 	        (and (contains? (set (.get-table-one-relations (:dbconnection (meta this)) table-name)) (keyword column-name))
@@ -124,114 +122,19 @@
 			    (.get-table-primary-key-type (:dbconnection (meta this)) table-name)
 			    primary-key)))
 
+;; Object outlining the construction of a DB row
 (defrecord DBConstruct [table-name columns])
 
+;; Object outlining a fetch clause on a db table
 (defrecord DBClause [table-name column-name operator value])
 
-;; Record Operations
-;; TODO: recursively insert relations, adding the returned DBObject to the parent relation key
-;; TODO: this is a sketchy way to pull the pk on the return object, refactor this.
-(defn- insert-db-record [dbconnection table-name record]
-  (sql/with-connection (:spec dbconnection)
-    (sql/transaction
-     (let [;; Remove any columns that aren't in the schema definition
-	   columns  (try (reduce into
-				 (map #(if (not (nil? (record (keyword %))))
-					 (hash-map % (record %)))
-				      (.get-table-fields dbconnection table-name)))
-			 (catch IllegalArgumentException e record)) ;; NOTE: Breaks on multi relation tables, since those tables aren't in the schema getters
-	   ;; Find single relations and load their primary key into the record
-	   columns* (into columns
-			  (reduce into
-				  (or (for [[key value] columns]
-					(if (and (contains? (set (.get-table-one-relations dbconnection table-name)) (keyword key))
-						 (instance? DBObject value))
-					  (hash-map (keyword key) (:primary-key value)))) [])))
-	   ;; Remove the multi-relation fields from the insert set
-	   columns* (filter #(not (contains? (set (.get-table-many-relations dbconnection table-name)) (keyword (first %)))) columns*)]
-       (sql/insert-records table-name columns*)
-       (sql/with-query-results query-results
-	 ;; NOTE: this should return independently on each connection/transaction, races shouldn't be an issue (must verify this)
-	 ["SELECT LAST_INSERT_ID()"]
-	 ;; Insert multi-relation records
-	 (doall
-	  (for [relation (.get-table-many-relations dbconnection table-name)]
-	    (doall
-	     (for [foreign-object (get columns relation)]
-	       (insert-db-record dbconnection
-				 (generate-relation-table-name         table-name (.get-table-field-type  dbconnection table-name   relation))
-				 (hash-map (generate-relation-key-name table-name (.get-table-primary-key dbconnection table-name))
-					   (first (apply vals query-results))
-					   (generate-relation-key-name (.get-table-field-type dbconnection table-name relation) (.get-table-primary-key dbconnection relation))
-					   (if (instance? DBObject foreign-object) (:primary-key foreign-object) foreign-object)))))))
-	 ;; NOTE: Original record map still contains foreign objects instead of foreign primary keys for single relations
-	 (with-meta (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} columns)) {:dbconnection dbconnection})))))) 
-
-(defn- select-db-record [dbconnection table-name table-primary-key column-name column-type operator value]
-  (sql/with-connection (:spec dbconnection)
-    (sql/with-query-results query-results
-      [(join-as-str " " "SELECT * FROM"
-		        table-name
-			"WHERE"
-			column-name
-			(or operator :=)
-			(escape-field-value value column-type))]
-      (doall (for [result query-results]
-	       (let [primary-key (get result (keyword table-primary-key) "NULL") ;; TODO: fire off a warning on no PK
-		     base-dbo    (with-meta (DBObject. (keyword table-name) primary-key (dissoc (into {} result) (keyword table-primary-key))) {:dbconnection dbconnection})
-		     relations   (if (= :eager (.get-db-loading dbconnection))
-				   (for [relation (.get-table-relations dbconnection table-name)]
-				     [relation (.field base-dbo relation)]))]
-		 ;; Inject relation objects (if applicable) into the DBO
-		 (into base-dbo (into (:columns base-dbo) relations))))))))
-		   
-;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
-;; TODO: make typechecking (strings must escape!) more rigorous by comparing with schema instead of value (consider making this a helper)
-(defn- update-db-record [dbconnection table-name table-primary-key table-primary-key-type table-primary-key-value columns]
-  (let [columns (dissoc columns (keyword table-primary-key))
-	columns (into columns
-		      (for [[key value] columns]
-			(if (and (contains? (set (.get-table-one-relations dbconnection table-name)) (keyword key))
-				 (instance? DBObject value))
-			  [key (:primary-key (first
-					      (select-db-record dbconnection
-								(.get-table-field-type       dbconnection table-name key)
-								(.get-table-primary-key      dbconnection (.get-table-field-type dbconnection table-name key))
-								(.get-table-primary-key      dbconnection (.get-table-field-type dbconnection table-name key))
-								(.get-table-primary-key-type dbconnection (.get-table-field-type dbconnection table-name key))
-								:=
-								(:primary-key value))))])))
-        columns (apply (partial join-as-str ", ")
-		       (filter (complement nil?)
-			       (for [[column-name column-value] columns]
-				 (cond (string? column-value)    (as-str column-name " = \"" column-value "\"")
-				       (not (nil? column-value)) (as-str column-name " = "   column-value)))))]
-    (sql/with-connection (:spec dbconnection)
-      (sql/do-commands (join-as-str " " "UPDATE"
-				        table-name
-					"SET"
-				        columns
-					"WHERE"
-					table-primary-key
-					"="
-					(escape-field-value table-primary-key-value table-primary-key-type))))))
-		     
-;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
-(defn- delete-db-record [dbconnection table-name primary-key primary-key-type primary-key-value]
-  (sql/with-connection (:spec dbconnection)
-    (sql/do-commands (join-as-str " " "DELETE FROM"
-				      table-name
-				      "WHERE"
-				      primary-key
-				      "="
-				      (escape-field-value primary-key-value primary-key-type)))))
-
-;; ORM Interface (proper)
+;; ORM proper (CR only, UD is on DBOs)
 (defprotocol ISlurm
   "Simple CRUD interface for dealing with slurm objects"
   (create [#^SlurmDB slurmdb #^DBConstruct dbconstruct])
   (fetch  [#^SlurmDB slurmdb #^DBClause dbclause]))
 
+;; Representation of DB access
 ;; TODO: Lots of error checking on this
 (defrecord SlurmDB [#^DBConnection dbconnection]
   ISlurm
@@ -247,124 +150,6 @@
 			    (.get-table-field-type dbconnection  (name (:table-name dbclause)) (name (:column-name dbclause)))
 			    (or (:operator dbclause) :=)
 			    (:value dbclause))))
-
-;; DB Interface (direct access)
-(defprotocol IDBAccess
-  "Interface for directly querying the DB, perhaps useful for optimization (note, will not coerce results into Slurm objects).  Using SlurmDB is preferred."
-  (query   [#^DBConnection DB query])
-  (command [#^DBConnection DB command]))
-
-(defrecord DB [#^DBConnection dbconnection]
-  IDBAccess
-  (query [_ query]
-	 (sql/with-connection (:spec dbconnection)
-	   (sql/with-query-results query-results
-	     [query]
-	     (doall
-	      (for [result query-results]
-		result)))))
-  (command [_ command]
-	   (sql/with-connection (:spec dbconnection)
-	     (sql/do-commands command))))
-  
-;; Initialization and Verification
-;; TODO: support server pools at some point, for now just grab a single hostname
-;; TODO: figure out how to set engine when creating tables (patch on contrib?)
-;; TODO: figure out what to do on db-schema updates (currently left to the user
-;;       to update table and slurm-schema on any change). Inconsistencies between
-;;       db-schema and slurm-schema should probably trigger a warning, verify
-;;       schema against table definition if it already exists.
-;; TODO: ugly, fix
-(defn init
-  "Configures DB connection, and initializes DB schema (creates db and tables if needed)."
-  [schema-def
-   & [fetch-graph]]
-  (with-handler
-    (let [db-schema          (try (read-string (str schema-def)) (catch Exception e (raise err/SchemaError e "Could not read schema definiton.")))
-	  db-host            (get db-schema :db-server-pool "localhost")
-	  db-host            (if (string? db-host) db-host (first db-host)) ;; allow vector (multiple) or string (single) server defs
-	  db-port            (or (:db-port db-schema) 3306)
-	  db-root-subname    (str "//" db-host ":" db-port "/")
-	  db-name            (or (:db-name db-schema) "slurm_db")
-	  db-user            (or (:user db-schema) "root") ;; TODO: this is probably a bad idea for a default
-	  db-password        (:password db-schema)
-	  db-connection-spec {:classname "com.mysql.jdbc.Driver"
-			      :subprotocol "mysql"
-			      :subname (str db-root-subname db-name)
-			      :user db-user
-			      :password db-password}
-	  db (DBConnection. db-connection-spec db-schema nil)]
-	;; check db schema for bad keys, and verify the db connection (create db if it doesn't exist)
-	(if (not (exists-db? db-connection-spec db-root-subname db-name))
-	  (do
-	    (raise err/SchemaWarningDBNoExist db-name "DB not found on host, will attempt to create it")
-	    (create-db db-connection-spec db-root-subname db-name)))
-	(if (not-empty (seq (filter (complement valid-schema-db-keys) (keys db-schema))))
-	  (raise err/SchemaWarningUnknownKeys
-		 (filter (complement valid-schema-db-keys) (keys db-schema))
-		 (str "Verify schema root keys")))
-	;; Consume the table definitions
-	(doseq [table (:tables db-schema)]
-	  (if (not-empty (seq (filter (complement valid-schema-table-keys) (keys table))))
-	    (raise err/SchemaWarningUnknownKeys
-		   (filter (complement valid-schema-table-keys) (keys table))
-		   (str "Verify table definition for '" (name (:name table "<TABLE-NAME-KEY-MISSING>")) "'")))
-	  (if (nil? (.get-table db (:name table)))
-	    (raise err/SchemaErrorBadTableName table))
-	  (let [table-name    (:name table)
-		table-columns (cons [(.get-table-primary-key db table-name)
-				     (.get-table-primary-key-type db table-name)
-				     "PRIMARY KEY"
-				     (if (.get-table-primary-key-auto db table-name)
-				         "AUTO_INCREMENT")]
-				    (or (map #(vector % (.get-table-field-type db table-name %))
-					     (clojure.set/difference (set (.get-table-fields    db table-name))
-								     (.get-table-many-relations db table-name)
-								     (.get-table-one-relations  db table-name)))
-					[]))
-		relations     (for [relation (.get-table-one-relations db table-name)] ;; Single relations are keyed into the table schema directly
-				(let [related-table-name (.get-table-field-type db table-name relation)
-				      foreign-key-constraint (generate-foreign-key-constraint relation related-table-name (.get-table-primary-key db related-table-name))]
-				  [[relation (.get-table-primary-key-type db related-table-name)]
-				   foreign-key-constraint])) ;; returns a seq of relation key/type and constraint
-		table-columns (concat table-columns (apply concat relations))]
-	    (do
-	      (if (not (exists-table? db-connection-spec db-root-subname db-name table-name))
-		(do
-		  (raise err/SchemaWarningTableNoExist (name table-name) "Table not found on host/db, will attempt to create it")
-		  (apply create-table db-connection-spec table-name table-columns))) ;; if table doesn't exist, create it
-	      ;; Multi relations are keyed to an intermediate relation table
-	      (doseq [relation (.get-table-many-relations db table-name)] ;; create multi-relation intermediate tables
-		(let [related-table-name     (.get-table-field-type db table-name relation)
-		      related-table          (or (.get-table db related-table-name)
-						 (raise err/SchemaErrorBadTableName relation
-							(str "Relation table name not found or badly formed, on relation '"
-							     (as-str relation) "' in table definition '"
-							     (as-str table-name) "'")))
-		      origin-table-key       (generate-relation-key-name table-name (.get-table-primary-key db table-name))
-		      related-table-key      (generate-relation-key-name related-table-name (.get-table-primary-key db related-table-name))
-		      related-table-key-type (.get-table-primary-key-type db related-table-name)
-		      relation-table-name    (generate-relation-table-name table-name related-table-name)
-		      relation-table-columns [[:id "int(11)" "PRIMARY KEY" "AUTO_INCREMENT"]] ;; relation tables cannot have configurable primary keys
-		      relation-table-columns (conj relation-table-columns [origin-table-key (.get-table-primary-key-type db table-name)])
-		      relation-table-columns (conj relation-table-columns (generate-foreign-key-constraint-cascade-delete origin-table-key
-															  table-name
-															  (.get-table-primary-key db table-name)))
-		      relation-table-columns (conj relation-table-columns [related-table-key related-table-key-type])
-		      relation-table-columns (conj relation-table-columns (generate-foreign-key-constraint-cascade-delete related-table-key
-															  related-table-name
-															  (.get-table-primary-key db related-table-name)))]
-		  (if (not (exists-table? db-connection-spec db-root-subname db-name relation-table-name))
-		    (do
-		      (raise err/SchemaWarningTableNoExist
-			     (as-str related-table-name)
-			     (join-as-str " " "Relation intermediary table"
-					      (as-str "(" table-name "->" related-table-name ")")
-					      "not found on host/db, will attempt to create it"))
-		      (apply create-table db-connection-spec relation-table-name relation-table-columns))))))))
-	(SlurmDB. db))
-    (handle err/SchemaWarning [] (continue-with nil)) ;; NOTE: Logging behaviour is handled in the SchemaError/Warning def
-    (handle err/SchemaError   [])))                   ;;       Empty handlers are to supress java exception
 
 ;; Command-line Interface (used to initialize schemas only)
 ;; TODO: at some point add a REPL to allow playing with the DB through the CLI
