@@ -1,10 +1,13 @@
 (ns slurm.initialize
-  (:require [slurm.error :as err]
-	    [slurm.core])
-  (:import  [slurm.core DBConnection SlurmDB])
+  (:require [slurm.error      :as err]
+	    [slurm.connection :as connect]
+	    [slurm.orm        :as orm])
+  (:import  [slurm.connection DBConnection]
+	    [slurm.orm        SlurmDB])
   (:use     [clojure.contrib.error-kit :only (with-handler handle continue-with raise)]
 	    [clojure.contrib.string    :only (as-str)]
-	    [slurm.internal]))
+	    [slurm.internal])
+  (:gen-class))
 
 ;; Initialization and Verification
 ;; TODO: support server pools at some point, for now just grab a single hostname
@@ -106,3 +109,14 @@
 	(SlurmDB. db))
     (handle err/SchemaWarning [] (continue-with nil)) ;; NOTE: Logging behaviour is handled in the SchemaError/Warning def
     (handle err/SchemaError   [])))                   ;;       Empty handlers are meant to supress java exception
+
+;; Command-line Interface (used to initialize schemas only)
+;; TODO: at some point add a REPL to allow playing with the DB through the CLI
+(defn -main [& args]
+  (let [schema-file (first args)]
+    (do
+      (if (nil? schema-file)
+	(println "Slurm command-line utility used to verify and initialize schema definition.\nUsage: java -jar slurm.jar <schema-filename>")
+	(let [orm (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e))))]
+	  (do
+	    (println "Database schema successfully initialized")))))))

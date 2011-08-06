@@ -1,8 +1,9 @@
-(ns example.db_io
-  (:require [slurm.core :as slurm])
-  (:import  [slurm.core DBConstruct DBObject DBClause]))
+(ns example.db_example
+  (:require [slurm.initialize :as slurm]
+	    [slurm.orm        :as orm])
+  (:import  [slurm.orm        DBObject DBConstruct DBClause]))
 
-(def db-schema (try (slurp "src/example/db-schema") (catch Exception e (println "Failed to open schema file\n" e))))
+(def db-schema (try (slurp "src/example/db_schema") (catch Exception e (println "Failed to open schema file\n" e))))
 
 (defn -main []
   ;; Initialize the tables and create some dummy data
