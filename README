@@ -16,4 +16,4 @@ Slurm is in active development, please check back for updates often.  If you nee
 lein compile
 lein run
 
->> this will automatically run the code under example/db_io.clj
+>> this will automatically run the code under example/db_example.clj
