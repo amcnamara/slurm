@@ -4,4 +4,11 @@
 ;; Representation of a fetch clause on a db table
 (defrecord DBClause [table-name column-name operator value])
 
-;; (.fetch  slurmdb (DBClause. table (.get-table-primary-key dbconnection) := pk))
+(defmacro gen-partial-clause
+  "Interns a partial function for the fetching of a/many db records as bound
+   in core/with-orm.  Returns a hash-map with a bindable symbol keyed to the
+   ns-qualified function name."
+  [slurmdb table-name]
+  `(let [fname# (sym ~table-name)]
+     (hash-map fname#
+	       (intern 'slurm.clause fname# #(.fetch ~slurmdb (DBClause. ~table-name (.get-table-primary-key (:dbconnection ~slurmdb) ~table-name) :=  %))))))

@@ -12,7 +12,8 @@
   (let [dbconnection (:dbconnection slurmdb)]
     (reduce into
 	    (for [table (.get-table-names dbconnection)]
-	      (construct/gen-partial-construct slurmdb table)))))
+	      (into (construct/gen-partial-construct slurmdb table)
+		    (clause/gen-partial-clause slurmdb table))))))
 
 (defmacro with-orm
   "Captures <table-name>! and <table-name> symbols and binds them to partial

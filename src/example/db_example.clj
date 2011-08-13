@@ -6,7 +6,8 @@
 
 (defn -main []
   (with-orm db-schema
-    (let [test-course  (course!  {:name "Software Design I"})
+    (let [test-course1 (course!  {:name "Software Design I"})
 	  test-address (address! {:number 2354 :street "Rue St-Jacques" :city "Montreal" :province "QC" :country "Canada"})
-	  test-student (student! {:name "Alex McNamara" :courses [test-course] :address test-address})]
-      (println "Test student DBO: " test-student))))
+	  test-student (student! {:name "Alex McNamara" :courses [test-course1] :address test-address})]
+      (println "Test student DBO: " test-student)
+      (println "Query course where id = 1, returns DBO: " (course 1)))))
