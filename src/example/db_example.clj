@@ -9,5 +9,6 @@
     (let [test-course1 (course!  {:name "Software Design I"})
 	  test-address (address! {:number 2354 :street "Rue St-Jacques" :city "Montreal" :province "QC" :country "Canada"})
 	  test-student (student! {:name "Alex McNamara" :courses [test-course1] :address test-address})]
-      (println "Test student DBO: " test-student)
-      (println "Query course where id = 1, returns DBO: " (course 1)))))
+      (println "Test student DBO:\n\t"                   test-student)
+      (println "Get DBO for course where id = 1:\n\t"    (course 1))
+      (println "Get DBOs for addresses in Montreal:\n\t" (address :city "Montreal")))))

@@ -11,4 +11,5 @@
   [slurmdb table-name]
   `(let [fname# (sym ~table-name)]
      (hash-map fname#
-	       (intern 'slurm.clause fname# #(.fetch ~slurmdb (DBClause. ~table-name (.get-table-primary-key (:dbconnection ~slurmdb) ~table-name) :=  %))))))
+	       (intern 'slurm.clause fname# (fn ([pk#]       (first (.fetch ~slurmdb (DBClause. ~table-name (.get-table-primary-key (:dbconnection ~slurmdb) ~table-name) :=  pk#))))
+					        ([col# val#] (.fetch ~slurmdb (DBClause. ~table-name col# := val#))))))))
