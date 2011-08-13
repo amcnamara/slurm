@@ -1,9 +1,9 @@
 (ns slurm.orm
-  (:require [slurm.connection       :as connect]
+  (:require [slurm.connection       :as connection]
 	    [clojure.contrib.sql    :as sql])
   (:import  [slurm.connection       DBConnection])
-  (:use     [clojure.contrib.string :only (as-str substring? lower-case)]
-	    [slurm.internal]))
+  (:use     [slurm.internal]
+	    [clojure.contrib.string :only (as-str)]))
 
 ;; Forward declaration of record operations
 (declare insert-db-record
@@ -11,17 +11,44 @@
 	 update-db-record
 	 delete-db-record)
 
-;; DBObject protocols (UD and field loading)
+;; ORM proper (CR only, UD is on DBOs)
+(defprotocol ISlurm
+   ;;"Simple CRud interface for dealing with slurm DBOs.  Create takes a DBConstruct
+   ;;and creates a new record in the DB and returns a DBO representation of the data.
+   ;;Fetch takes a DBClause and returns a sequence of DBOs representing the record
+   ;;result-set of the given query operation."
+  (create [#^SlurmDB slurmdb #^DBConstruct dbconstruct])
+  (fetch  [#^SlurmDB slurmdb #^DBClause dbclause]))
+
+(defrecord SlurmDB [#^DBConnection dbconnection]
+  ;;"SlurmDB is a representation of DB connection/access and object mapping, operations defined in ISlurm."
+  ISlurm
+  (create [_ dbconstruct]
+	  (insert-db-record dbconnection
+			    (:table-name dbconstruct)
+			    (:columns dbconstruct)))
+  (fetch  [_ dbclause]
+	  (select-db-record dbconnection
+			    (:table-name dbclause)
+			    (.get-table-primary-key dbconnection (name (:table-name dbclause)))
+			    (:column-name dbclause)
+			    (.get-table-field-type dbconnection  (name (:table-name dbclause)) (name (:column-name dbclause)))
+			    (or (:operator dbclause) :=)
+			    (:value dbclause))))
+
+;; DBObject protocol and implementation (UD and field loading)
 (defprotocol IDBRecord
-  "Simple accessor for DBObjects, returns a column or relation object (loads if applicable/needed), and manages the access graph"
+  ;;"Simple accessor for DBObjects.  Field returns a column or relation object (loads if
+  ;; applicable/needed), and manages the access graph. Assoc* takes a map of column/values
+  ;; and updates the record in the DB, and returns a new DBO representing the changed
+  ;; state.  Delete removes the record from the database."
   (field  [#^DBObject dbobject column-name])
   (assoc* [#^DBObject dbobject new-columns])
   (delete [#^DBObject dbobject]))
 
-;; Objects representing data mapping from DB rows
 (defrecord DBObject [table-name primary-key columns]
+  ;;"DBOs are representations of data mappings from DB records, operations defined in IDBRecord."
   IDBRecord
-  ;; TODO: Multi-relation fields should fetch with joins, current implementation in crazy inefficient
   (field  [this column-name]
 	  (cond ;; Grab a single-relation field
 	        (and (contains? (set (.get-table-one-relations (:dbconnection (meta this)) table-name)) (keyword column-name))
@@ -69,35 +96,6 @@
 			    (.get-table-primary-key      (:dbconnection (meta this)) table-name)
 			    (.get-table-primary-key-type (:dbconnection (meta this)) table-name)
 			    primary-key)))
-
-;; Object outlining the construction of a DB row
-(defrecord DBConstruct [table-name columns])
-
-;; Object outlining a fetch clause on a db table
-(defrecord DBClause [table-name column-name operator value])
-
-;; ORM proper (CR only, UD is on DBOs)
-(defprotocol ISlurm
-  "Simple CRUD interface for dealing with slurm objects"
-  (create [#^SlurmDB slurmdb #^DBConstruct dbconstruct])
-  (fetch  [#^SlurmDB slurmdb #^DBClause dbclause]))
-
-;; Representation of DB access
-;; TODO: Lots of error checking on this
-(defrecord SlurmDB [#^DBConnection dbconnection]
-  ISlurm
-  (create [_ dbconstruct]
-	  (insert-db-record dbconnection
-			    (:table-name dbconstruct)
-			    (:columns dbconstruct)))
-  (fetch  [_ dbclause]
-	  (select-db-record dbconnection
-			    (:table-name dbclause)
-			    (.get-table-primary-key dbconnection (name (:table-name dbclause)))
-			    (:column-name dbclause)
-			    (.get-table-field-type dbconnection  (name (:table-name dbclause)) (name (:column-name dbclause)))
-			    (or (:operator dbclause) :=)
-			    (:value dbclause))))
 
 ;; Record Operations
 (defn- insert-db-record [dbconnection table-name record]

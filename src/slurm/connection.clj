@@ -1,5 +1,6 @@
 (ns slurm.connection
-  (:use [clojure.contrib.string :only (as-str substring? lower-case)]))
+  (:use [clojure.contrib.string :only (as-str substring? lower-case)])
+  (:gen-class))
 
 ;; DB Access Protocols
 (defprotocol IDBInfo

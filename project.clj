@@ -3,6 +3,5 @@
   :dependencies     [[org.clojure/clojure         "1.2.0"]
                      [org.clojure/clojure-contrib "1.2.0"]
 		     [com.mysql/connectorj        "5.1.12"]]
-  :dev-dependencies [[leiningen/lein-swank        "1.2.0-SNAPSHOT"]
-		     [lein-clojars                "0.6.0"]]
+  :dev-dependencies [[lein-clojars                "0.6.0"]]
   :main example.db_example)

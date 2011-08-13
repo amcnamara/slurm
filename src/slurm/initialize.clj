@@ -1,6 +1,6 @@
 (ns slurm.initialize
   (:require [slurm.error      :as err]
-	    [slurm.connection :as connect]
+	    [slurm.connection :as connection]
 	    [slurm.orm        :as orm])
   (:import  [slurm.connection DBConnection]
 	    [slurm.orm        SlurmDB])
@@ -9,17 +9,15 @@
 	    [slurm.internal]))
 
 ;; Initialization and Verification
-;; TODO: support server pools at some point, for now just grab a single hostname
-;; TODO: figure out how to set engine when creating tables (patch on contrib?)
-;; TODO: figure out what to do on db-schema updates (currently left to the dev
+;; TODO: Figure out how to set engine when creating tables (patch on contrib?)
+;; TODO: Figure out what to do on db-schema updates (currently left to the dev
 ;;       to update table and slurm-schema on any change). Inconsistencies between
 ;;       db-schema and slurm-schema should probably trigger a warning, verify
 ;;       schema against table definition if it already exists.
-;; TODO: ugly, fix
+;; TODO: Ugly, fix
 (defn init
   "Configures DB connection, and initializes DB schema (creates db and tables if needed)."
-  [schema-def
-   & [fetch-graph]]
+  [schema-def & [fetch-graph]]
   (with-handler
     (let [db-schema          (try (read-string (str schema-def)) (catch Exception e (raise err/SchemaError e "Could not read schema definiton.")))
 	  db-host            (get db-schema :db-server-pool "localhost")
@@ -108,14 +106,3 @@
 	(SlurmDB. db))
     (handle err/SchemaWarning [] (continue-with nil)) ;; NOTE: Logging behaviour is handled in the SchemaError/Warning def
     (handle err/SchemaError   [])))                   ;;       Empty handlers are meant to supress java exception
-
-;; Command-line Interface (used to initialize schemas only)
-;; TODO: at some point add a REPL to allow playing with the DB through the CLI
-(defn -main [& args]
-  (let [schema-file (first args)]
-    (do
-      (if (nil? schema-file)
-	(println "Slurm command-line utility used to verify and initialize schema definition.\nUsage: java -jar slurm.jar <schema-filename>")
-	(let [orm (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e))))]
-	  (do
-	    (println "Database schema successfully initialized")))))))

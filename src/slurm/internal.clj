@@ -2,7 +2,20 @@
   (:require [clojure.contrib.sql :as sql]
 	    [slurm.error         :as err])
   (:use     [clojure.contrib.error-kit :only (with-handler handle raise)]
-	    [clojure.contrib.string    :only (join substring? lower-case as-str)]))
+	    [clojure.contrib.string    :only (join substring? lower-case as-str)])
+  (:gen-class))
+
+(defn sym [name]
+  "Coerces into a symbol"
+  (symbol (as-str name)))
+
+(defn sym-bang [name]
+  "Coerces into a symbol with appended exclamation"
+  (symbol (as-str name "!")))
+
+(defn bind-map [hmap]
+  "Creates a binding-like vector of symbol/value pairs from a hash-map"
+  (apply vector (interleave (map sym (keys hmap)) (vals hmap))))
 
 (defn exists-db?
   "Checks that a given DB exists on the host"
