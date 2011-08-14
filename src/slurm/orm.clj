@@ -188,7 +188,8 @@
 		value-map           (reduce str (interpose ", " (map #(sql-list (conj [table-primary-key-value] %)) relation-keys)))]
 	    (do
 	      (sql/do-commands (join-as-str " " "DELETE FROM" relation-table-name "WHERE" local-key-name := table-primary-key-value))
-	      (sql/do-commands (join-as-str " " "INSERT INTO" relation-table-name insert-binding "VALUES" value-map)))))))))
+	      (if (not-empty value-map)
+		(sql/do-commands (join-as-str " " "INSERT INTO" relation-table-name insert-binding "VALUES" value-map))))))))))
 
 ;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
 (defn- delete-db-record [dbconnection table-name primary-key primary-key-type primary-key-value]
