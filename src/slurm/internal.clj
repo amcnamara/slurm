@@ -92,12 +92,16 @@
 ;; TODO: think about this
 (defn dump-load-graph [] ())
 
-(defn escape-field-value [value column-type]
-  (if (nil? value)
-    0
-    (if (substring? "varchar" (lower-case (name column-type)))
-      (str "\"" value "\"")
-      value)))
+(defn escape-field-value
+  "Takes a sql input value and escapes it as needed."
+  ([value]
+     (escape-field-value value (type value)))
+  ([value column-type]
+     (if (nil? value)
+       0
+       (if (substring? "varchar" (lower-case (as-str column-type)))
+	 (str "\"" value "\"")
+	 value))))
 
 (defn join-as-str [separator & coll]
   (join separator (map as-str coll)))
@@ -119,6 +123,12 @@
 (defn generate-foreign-key-constraint-cascade-delete [key-name foreign-table-name foreign-primary-key]
   (conj (generate-foreign-key-constraint key-name foreign-table-name foreign-primary-key)
 	"ON DELETE CASCADE"))
+
+(defn sql-list
+  "Generates a comma-separated, escaped, and bracket wrapped string for use in sql
+   queries from a clojure sequence of inputs"
+  [coll]
+  (str "(" (reduce as-str (interpose ", " (map escape-field-value coll))) ")"))
 
 (def valid-schema-db-keys
   #{:db-server-pool

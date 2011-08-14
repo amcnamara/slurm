@@ -155,30 +155,41 @@
 ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
 ;; TODO: make typechecking (strings must escape!) more rigorous by comparing with schema instead of value
 (defn- update-db-record [dbconnection table-name table-primary-key table-primary-key-type table-primary-key-value columns]
-  (let [columns (into columns
-		      (for [[key value] columns]
-			(if (and (contains? (set (.get-table-one-relations dbconnection table-name)) (keyword key))
-				 (instance? DBObject value))
-			  [key (:primary-key value)])))
-        columns (apply (partial join-as-str ", ")
-		       (filter (complement nil?)
-			       (for [[column-name column-value] columns]
-				 (cond (string? column-value)    (as-str column-name " = \"" column-value "\"")
-				       (not (nil? column-value)) (as-str column-name " = "   column-value)))))]
+  (let [columns* (apply dissoc columns (.get-table-many-relations dbconnection table-name))
+	columns* (into columns*
+		       (for [[key value] columns*]
+			 (if (and (contains? (set (.get-table-one-relations dbconnection table-name)) (keyword key))
+				  (instance? DBObject value))
+			   [key (:primary-key value)])))
+        columns* (apply (partial join-as-str ", ")
+			(filter (complement nil?)
+				(for [[column-name column-value] columns*]
+				  (if (not (nil? column-value)) (join-as-str " " column-name := (escape-field-value column-value))))))]
     (sql/with-connection (:spec dbconnection)
-      (sql/do-commands (join-as-str " " "UPDATE"
-				        table-name
-					"SET"
-				        columns
-					"WHERE"
-					table-primary-key
-					"="
-					(escape-field-value table-primary-key-value table-primary-key-type))))))
-
+      (if (not-empty columns*)
+	(sql/do-commands (join-as-str " " "UPDATE"
+				          table-name
+					  "SET"
+					  columns*
+					  "WHERE"
+					  table-primary-key
+					  "="
+					  (escape-field-value table-primary-key-value table-primary-key-type))))
       ;; Update multi-relation intermediary tables
-      ;;(doseq [relation (.get-table-many-relations db-connection table-name)]
-	;;()))))
-		     
+      (doseq [relation (.get-table-many-relations dbconnection table-name)]
+	;; If the updaded column map contains multi relation keys, update the intermediary tables accordingly
+	(if (contains? columns relation)
+	  (let [local-key-name      (generate-relation-key-name table-name table-primary-key)
+		foreign-key-name    (generate-relation-key-name (.get-table-field-type dbconnection table-name relation)
+								(.get-table-primary-key dbconnection relation))
+		insert-binding      (sql-list [local-key-name foreign-key-name])
+		relation-table-name (generate-relation-table-name table-name (.get-table-field-type dbconnection table-name relation)) 
+		relation-keys       (map #(or (:primary-key %) %) (get columns relation))
+		value-map           (reduce str (interpose ", " (map #(sql-list (conj [table-primary-key-value] %)) relation-keys)))]
+	    (do
+	      (sql/do-commands (join-as-str " " "DELETE FROM" relation-table-name "WHERE" local-key-name := table-primary-key-value))
+	      (sql/do-commands (join-as-str " " "INSERT INTO" relation-table-name insert-binding "VALUES" value-map)))))))))
+
 ;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
 (defn- delete-db-record [dbconnection table-name primary-key primary-key-type primary-key-value]
   (sql/with-connection (:spec dbconnection)
