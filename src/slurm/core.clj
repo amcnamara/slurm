@@ -47,7 +47,7 @@
   `(let [slurmdb# (init ~db-schema)
 	 sym-map# (accessor-map slurmdb#)
 	 binding# (bind-map sym-map#)]
-     (eval `(let ~binding# (doall ~@'~body)))))
+     (eval `(let* ~binding# (doall ~@'~body)))))
 
 ;; TODO: at some point add a REPL to allow playing with the DB through the CLI
 (defn -main

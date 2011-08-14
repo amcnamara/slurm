@@ -85,7 +85,7 @@
 		      related-table-key      (generate-relation-key-name related-table-name (.get-table-primary-key db related-table-name))
 		      related-table-key-type (.get-table-primary-key-type db related-table-name)
 		      relation-table-name    (generate-relation-table-name table-name related-table-name)
-		      relation-table-columns [[:id "int(11)" "PRIMARY KEY" "AUTO_INCREMENT"]] ;; relation tables cannot have configurable primary keys
+		      relation-table-columns [[:id "int(11)" "PRIMARY KEY" "AUTO_INCREMENT"]] ;; Relation tables cannot have configurable primary keys
 		      relation-table-columns (conj relation-table-columns [origin-table-key (.get-table-primary-key-type db table-name)])
 		      relation-table-columns (conj relation-table-columns (generate-foreign-key-constraint-cascade-delete origin-table-key
 															  table-name
