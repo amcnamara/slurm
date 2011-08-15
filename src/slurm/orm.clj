@@ -161,10 +161,9 @@
         columns* (flatten (reduce into (for [[key value] columns*] [(escape-field-value (or (:primary-key value) value))])))
 	columns* (concat columns* [(escape-field-value table-primary-key-value table-primary-key-type)])
 	request  (join-as-str " " "UPDATE" table-name "SET" name-sig "WHERE" table-primary-key :=?)]
-    (println columns*)
     (sql/with-connection (:spec dbconnection)
       (if (not-empty columns*)
-	(sql/do-prepared request columns*)
+	(sql/do-prepared request columns*))
       ;; Update multi-relation intermediary tables
       (doseq [relation (.get-table-many-relations dbconnection table-name)]
 	;; If the updaded column map contains multi relation keys, update the intermediary tables accordingly
@@ -175,11 +174,14 @@
 		insert-binding      (sql-list [local-key-name foreign-key-name])
 		relation-table-name (generate-relation-table-name table-name (.get-table-field-type dbconnection table-name relation)) 
 		relation-keys       (map #(or (:primary-key %) %) (get columns relation))
-		value-map           (reduce str (interpose ", " (map #(sql-list (conj [table-primary-key-value] %)) relation-keys)))]
+		value-sig           (reduce str (interpose ", " (repeat (count relation-keys) (prepare-sql-list 2))))
+		value-map           (flatten (map #(vector table-primary-key-value %) relation-keys))
+		delete-request      (join-as-str " " "DELETE FROM" relation-table-name "WHERE" local-key-name :=?)
+		insert-request      (join-as-str " " "INSERT INTO" relation-table-name insert-binding "VALUES" value-sig)]
 	    (do
-	      (sql/do-commands (join-as-str " " "DELETE FROM" relation-table-name "WHERE" local-key-name := table-primary-key-value))
+	      (sql/do-prepared delete-request [(escape-field-value table-primary-key-value)])
 	      (if (not-empty value-map)
-		(sql/do-commands (join-as-str " " "INSERT INTO" relation-table-name insert-binding "VALUES" value-map)))))))))))
+		(sql/do-prepared insert-request value-map)))))))))
 
 ;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
 (defn- delete-db-record [dbconnection table-name primary-key primary-key-type primary-key-value]

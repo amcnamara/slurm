@@ -139,7 +139,7 @@
   "Generates a prepared-statement formatted sql-list, with n arguments."
   [n]
   (assert (integer? n))
-  (sql-list (repeat n "?")))
+  (sql-list (repeat n \?)))
 
 ;; This set contains the valid keys at the root-level of a db-schema definition
 (def valid-schema-db-keys
