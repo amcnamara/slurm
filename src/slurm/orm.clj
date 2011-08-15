@@ -89,7 +89,7 @@
 				(.get-table-primary-key-type (:dbconnection (meta this)) table-name)
 				primary-key
 				new-columns)
-	      (DBObject. table-name primary-key (into columns new-columns)))))
+	      (with-meta (DBObject. table-name primary-key (into columns new-columns)) (meta this)))))
   (delete [this]
 	  (delete-db-record (:dbconnection (meta this))
 			    table-name
@@ -135,22 +135,18 @@
 	 (with-meta (DBObject. (keyword table-name) (first (apply vals query-results)) (into {} columns)) {:dbconnection dbconnection})))))) 
 
 (defn- select-db-record [dbconnection table-name table-primary-key column-name column-type operator value]
-  (sql/with-connection (:spec dbconnection)
-    (sql/with-query-results query-results
-      [(join-as-str " " "SELECT * FROM"
-		        table-name
-			"WHERE"
-			column-name
-			(or operator :=)
-			(escape-field-value value column-type))]
-      (doall (for [result query-results]
-	       (let [primary-key (get result (keyword table-primary-key) "NULL") ;; TODO: fire off a warning on no PK
-		     base-dbo    (with-meta (DBObject. (keyword table-name) primary-key (dissoc (into {} result) (keyword table-primary-key))) {:dbconnection dbconnection})
-		     relations   (if (= :eager (.get-db-loading dbconnection))
-				   (for [relation (.get-table-relations dbconnection table-name)]
-				     [relation (.field base-dbo relation)]))]
-		 ;; Inject relation objects (if applicable) into the DBO
-		 (into base-dbo (into (:columns base-dbo) relations))))))))
+  (let [request (join-as-str " " :SELECT :* :FROM table-name :WHERE column-name (or operator :=) (escape-field-value value column-type))]
+    (sql/with-connection (:spec dbconnection)
+      (sql/with-query-results query-results
+	[request]
+	(doall (for [result query-results]
+		 (let [primary-key (get result (keyword table-primary-key) "NULL") ;; TODO: fire off a warning on no PK
+		       base-dbo    (with-meta (DBObject. (keyword table-name) primary-key (dissoc (into {} result) (keyword table-primary-key))) {:dbconnection dbconnection})
+		       relations   (if (= :eager (.get-db-loading dbconnection))
+				     (for [relation (.get-table-relations dbconnection table-name)]
+				       [relation (.field base-dbo relation)]))]
+		   ;; Inject relation objects (if applicable) into the DBO
+		   (into base-dbo (into (:columns base-dbo) relations)))))))))
 		   
 ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
 ;; TODO: make typechecking (strings must escape!) more rigorous by comparing with schema instead of value
@@ -160,31 +156,32 @@
         name-sig (reduce as-str (interpose ", " (map #(as-str % :=?) (keys columns*))))
         columns* (flatten (reduce into (for [[key value] columns*] [(escape-field-value (or (:primary-key value) value))])))
 	columns* (concat columns* [(escape-field-value table-primary-key-value table-primary-key-type)])
-	request  (join-as-str " " "UPDATE" table-name "SET" name-sig "WHERE" table-primary-key :=?)]
+	request  (join-as-str " " :UPDATE table-name :SET name-sig :WHERE table-primary-key :=?)]
     (sql/with-connection (:spec dbconnection)
-      (if (not-empty columns*)
-	(sql/do-prepared request columns*))
-      ;; Update multi-relation intermediary tables
-      (doseq [relation (.get-table-many-relations dbconnection table-name)]
-	;; If the updaded column map contains multi relation keys, update the intermediary tables accordingly
-	(if (contains? columns relation)
-	  (let [local-key-name      (generate-relation-key-name table-name table-primary-key)
-		foreign-key-name    (generate-relation-key-name (.get-table-field-type dbconnection table-name relation)
-								(.get-table-primary-key dbconnection relation))
-		insert-binding      (sql-list [local-key-name foreign-key-name])
-		relation-table-name (generate-relation-table-name table-name (.get-table-field-type dbconnection table-name relation)) 
-		relation-keys       (map #(or (:primary-key %) %) (get columns relation))
-		value-sig           (reduce str (interpose ", " (repeat (count relation-keys) (prepare-sql-list 2))))
-		value-map           (flatten (map #(vector table-primary-key-value %) relation-keys))
-		delete-request      (join-as-str " " "DELETE FROM" relation-table-name "WHERE" local-key-name :=?)
-		insert-request      (join-as-str " " "INSERT INTO" relation-table-name insert-binding "VALUES" value-sig)]
-	    (do
-	      (sql/do-prepared delete-request [(escape-field-value table-primary-key-value)])
-	      (if (not-empty value-map)
-		(sql/do-prepared insert-request value-map)))))))))
+      (sql/transaction
+       (if (not-empty columns*)
+	 (sql/do-prepared request columns*))
+       ;; Update multi-relation intermediary tables
+       (doseq [relation (.get-table-many-relations dbconnection table-name)]
+	 ;; If the updaded column map contains multi relation keys, update the intermediary tables accordingly
+	 (if (contains? columns relation)
+	   (let [local-key-name      (generate-relation-key-name table-name table-primary-key)
+		 foreign-key-name    (generate-relation-key-name (.get-table-field-type dbconnection table-name relation)
+								 (.get-table-primary-key dbconnection relation))
+		 insert-binding      (sql-list [local-key-name foreign-key-name])
+		 relation-table-name (generate-relation-table-name table-name (.get-table-field-type dbconnection table-name relation)) 
+		 relation-keys       (map #(or (:primary-key %) %) (get columns relation))
+		 value-sig           (reduce str (interpose ", " (repeat (count relation-keys) (prepare-sql-list 2))))
+		 value-map           (flatten (map #(vector table-primary-key-value %) relation-keys))
+		 delete-request      (join-as-str " " :DELETE :FROM relation-table-name :WHERE local-key-name :=?)
+		 insert-request      (join-as-str " " :INSERT :INTO relation-table-name insert-binding :VALUES value-sig)]
+	     (do
+	       (sql/do-prepared delete-request [(escape-field-value table-primary-key-value)])
+	       (if (not-empty value-map)
+		 (sql/do-prepared insert-request value-map))))))))))
 
 ;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
 (defn- delete-db-record [dbconnection table-name primary-key primary-key-type primary-key-value]
   (sql/with-connection (:spec dbconnection)
-    (let [request (join-as-str " " "DELETE FROM" table-name "WHERE" primary-key :=?)]
+    (let [request (join-as-str " " :DELETE :FROM table-name :WHERE primary-key :=?)]
       (sql/do-prepared request [(escape-field-value primary-key-value primary-key-type)]))))
