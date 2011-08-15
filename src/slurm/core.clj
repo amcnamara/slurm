@@ -1,6 +1,7 @@
 (ns slurm.core
   (:require [slurm.clause     :as clause]
-	    [slurm.construct  :as construct])
+	    [slurm.construct  :as construct]
+	    [slurm.orm        :as orm])
   (:use     [slurm.initialize :only (init)]
 	    [slurm.internal   :only (bind-map)])
   (:gen-class))
@@ -27,7 +28,7 @@
        (<table-name> column-name column-value)
        (<table-name> & clauses)
 
-   NB: These symbols are captured, and may cause unexpected behavour if you try
+   NB: These symbols are captured, and may cause unexpected behaviour if you try
        to close similarly-named symbols around this macro.
 
    DBOs are the object representation of db records, and alongside the interface
@@ -46,6 +47,7 @@
   [db-schema & body]
   `(let [slurmdb# (init ~db-schema)
 	 sym-map# (accessor-map slurmdb#)
+	 sym-map# (into sym-map# {:field 'orm/field :assoc* 'orm/assoc* :delete 'orm/delete}) 
 	 binding# (bind-map sym-map#)]
      (eval `(let* ~binding# (doall ~@'~body)))))
 

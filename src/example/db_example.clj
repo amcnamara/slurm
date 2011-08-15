@@ -1,6 +1,5 @@
 (ns example.db_example
-  (:use [slurm.core :only (with-orm)])
-  (:gen-class))
+  (:use [slurm.core :only (with-orm)]))
 
 (def db-schema (try (slurp "src/example/db_schema") (catch Exception e (println "Failed to open schema file\n" e))))
 
@@ -16,9 +15,9 @@
       ;; Fetch a seq of address DBOs from the city of Montreal
       (address :city "Montreal")
       ;; Change the test-student record, and get the new DBO
-      (.assoc* test-student {:name "Bender Bending Rodriguez"})
+      (assoc* test-student {:name "Bender Bending Rodriguez"})
       ;; Clean up DB
-      (.delete test-course1)
-      (.delete test-course2)
-      (.delete test-address)
-      (.delete test-student))))
+      (delete test-course1)
+      (delete test-course2)
+      (delete test-address)
+      (delete test-student))))
