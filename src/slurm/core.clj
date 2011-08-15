@@ -2,7 +2,7 @@
   (:require [slurm.clause     :as clause]
 	    [slurm.construct  :as construct])
   (:use     [slurm.initialize :only (init)]
-	    [slurm.internal   :only (sym sym-bang bind-map)])
+	    [slurm.internal   :only (bind-map)])
   (:gen-class))
 
 (defn accessor-map

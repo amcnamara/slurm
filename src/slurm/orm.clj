@@ -155,26 +155,16 @@
 ;; TODO: create a transaction and add hierarchy of changes to include relations (nb. nested transactions escape up)
 ;; TODO: make typechecking (strings must escape!) more rigorous by comparing with schema instead of value
 (defn- update-db-record [dbconnection table-name table-primary-key table-primary-key-type table-primary-key-value columns]
+  (assert (not-empty columns))
   (let [columns* (apply dissoc columns (.get-table-many-relations dbconnection table-name))
-	columns* (into columns*
-		       (for [[key value] columns*]
-			 (if (and (contains? (set (.get-table-one-relations dbconnection table-name)) (keyword key))
-				  (instance? DBObject value))
-			   [key (:primary-key value)])))
-        columns* (apply (partial join-as-str ", ")
-			(filter (complement nil?)
-				(for [[column-name column-value] columns*]
-				  (if (not (nil? column-value)) (join-as-str " " column-name := (escape-field-value column-value))))))]
+        name-sig (reduce as-str (interpose ", " (map #(as-str % :=?) (keys columns*))))
+        columns* (flatten (reduce into (for [[key value] columns*] [(escape-field-value (or (:primary-key value) value))])))
+	columns* (concat columns* [(escape-field-value table-primary-key-value table-primary-key-type)])
+	request  (join-as-str " " "UPDATE" table-name "SET" name-sig "WHERE" table-primary-key :=?)]
+    (println columns*)
     (sql/with-connection (:spec dbconnection)
       (if (not-empty columns*)
-	(sql/do-commands (join-as-str " " "UPDATE"
-				          table-name
-					  "SET"
-					  columns*
-					  "WHERE"
-					  table-primary-key
-					  "="
-					  (escape-field-value table-primary-key-value table-primary-key-type))))
+	(sql/do-prepared request columns*)
       ;; Update multi-relation intermediary tables
       (doseq [relation (.get-table-many-relations dbconnection table-name)]
 	;; If the updaded column map contains multi relation keys, update the intermediary tables accordingly
@@ -189,14 +179,10 @@
 	    (do
 	      (sql/do-commands (join-as-str " " "DELETE FROM" relation-table-name "WHERE" local-key-name := table-primary-key-value))
 	      (if (not-empty value-map)
-		(sql/do-commands (join-as-str " " "INSERT INTO" relation-table-name insert-binding "VALUES" value-map))))))))))
+		(sql/do-commands (join-as-str " " "INSERT INTO" relation-table-name insert-binding "VALUES" value-map)))))))))))
 
 ;; TODO: need manual cleanup of relation tables for MyISAM (foreign constraints should kick in for InnoDB)
 (defn- delete-db-record [dbconnection table-name primary-key primary-key-type primary-key-value]
   (sql/with-connection (:spec dbconnection)
-    (sql/do-commands (join-as-str " " "DELETE FROM"
-				      table-name
-				      "WHERE"
-				      primary-key
-				      "="
-				      (escape-field-value primary-key-value primary-key-type)))))
+    (let [request (join-as-str " " "DELETE FROM" table-name "WHERE" primary-key :=?)]
+      (sql/do-prepared request [(escape-field-value primary-key-value primary-key-type)]))))
