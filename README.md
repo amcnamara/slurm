@@ -1,9 +1,10 @@
 SLURM
 =====
 
-> NOTE: Slurm is in ongoing development, and not yet ready for production.  However, I appreciate all feedback, ideas, and patches.
+**Slurm is in ongoing development, and not yet ready for production.  However, I appreciate all feedback, ideas, and patches.**
 
-Slurm is a Clojure ORM.  Its modeled more closely to a traditional OO ORM than a Clojure DSL, specifically to help beginners get off the ground.  It features the following:
+Slurm is a Clojure ORM.  Its modelled more closely to a traditional OO ORM than a Clojure DSL, specifically to help beginners get off the ground.  It features the following:
+
 * Selectable eager or lazy loading of database objects
 * Seamless single and multi object relations
 * Simple to define schemas, makes for easy adoption on existing projects/DBs
@@ -38,16 +39,16 @@ Now that you've defined the table outlines, you need to fill in the fields that 
 
 Note that all field names (and table names for that matter) should be keywordized.  Field types can either be SQL primatives (described below), or references to other tables.  Single references (ie. the field will point to at most a single row in the foreign table) are defined by putting the keword table-name of the table being referenced into the field-type value.  Muli reference fields (ie. one which contains reference to many rows of a different table) are defined with the keyword table-name prefixed with an asterisk, so a field called :enrolled_students with a multi relation to a table named :student may be defined as follows:
 
-     {:enrolled_students :*student, ...}
+    {:enrolled_students :*student, ...}
 
 Fields which represent standard SQL types may have the following field-types:
 
-     "int(n)"
-     "varchar(n)"
-     "bool"
-     "date"
-     "datetime"
-     "blob"...
+    "int(n)"
+    "varchar(n)"
+    "bool"
+    "date"
+    "datetime"
+    "blob"...
 
 > NOTE: n is a number usually representing the size of the data which can be saved into the field.  For example, "varchar(44)" would allow you to store a string of max 44 characters in that field.
 
@@ -62,15 +63,15 @@ Now that you've got your schema defined you're ready to use slurm!  Run lein jar
 
 Interacting with your database is extremely easy and can all be done from within the with-orm macro, which will take a db-schema and a body of code and evaluate that code with some db helpers.  The macro will bind some symbols within the body that you can use to interact with the db, each of the tables defined in the db-schema will have their own helper functions; for the following examples we assume that the db-schema passed into with-orm has defined a table named :student.
 
-     (defn my-program [my-db-schema]
-       (with-orm my-db-schema
-         (let [new-student (student! {:name "Alex McNamara"})])))
+    (defn my-program [my-db-schema]
+      (with-orm my-db-schema
+        (let [new-student (student! {:name "Alex McNamara"})])))
 
 This will create a new student record in the database.  The object returned from this function is called a DBObject, and they're used to hold the state of a particular db row (in this case a :student table's row, with the :name field valie of "Alex McNamara").  Creating data is that easy, and one of these helpers will be bound for each table definition in the db-schema with via transformation of :tablename to tablename!, and accept a map of field/value pairs to save.
 
 Queries are just as simple, their helpers would be defined in the above example as (student pk), or (student field-name field-value).  Genereally, the helpers follow the transformation of :tablename to tablename, and accept single, double, or variadic args as shown above.  An example, using the above code as reference would be:
 
-     (student :name "Alex McNamara")
+    (student :name "Alex McNamara")
 
 This would grab a sequence of all studend records with the name "Alex McNamara", and return (at least) the one defined in the exercise above.  Passing a single argument to student would query on that table's primary key, so (student 13) would grab the row with :id of 13, and return the single DBO.
 
