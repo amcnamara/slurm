@@ -143,7 +143,7 @@
 
 ;; This set contains the valid keys at the root-level of a db-schema definition
 (def valid-schema-db-keys
-  #{:db-server-pool
+  #{:db-host
     :db-port
     :db-name
     :db-user

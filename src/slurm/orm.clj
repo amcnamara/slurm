@@ -13,15 +13,15 @@
 
 ;; ORM proper (CR only, UD is on DBOs)
 (defprotocol ISlurm
-   ;;"Simple CRud interface for dealing with slurm DBOs.  Create takes a DBConstruct
-   ;;and creates a new record in the DB and returns a DBO representation of the data.
-   ;;Fetch takes a DBClause and returns a sequence of DBOs representing the record
-   ;;result-set of the given query operation."
+  ;;Simple CRud interface for dealing with slurm DBOs.  Create takes a DBConstruct
+  ;;and creates a new record in the DB and returns a DBO representation of the data.
+  ;;Fetch takes a DBClause and returns a sequence of DBOs representing the record
+  ;;result-set of the given query operation.
   (create [#^SlurmDB slurmdb #^DBConstruct dbconstruct])
   (fetch  [#^SlurmDB slurmdb #^DBClause dbclause]))
 
 (defrecord SlurmDB [#^DBConnection dbconnection]
-  ;;"SlurmDB is a representation of DB connection/access and object mapping, operations defined in ISlurm."
+  ;;SlurmDB is a representation of DB connection/access and object mapping, operations defined in ISlurm.
   ISlurm
   (create [_ dbconstruct]
 	  (insert-db-record dbconnection
@@ -38,16 +38,17 @@
 
 ;; DBObject protocol and implementation (UD and field loading)
 (defprotocol IDBRecord
-  ;;"Simple accessor for DBObjects.  Field returns a column or relation object (loads if
-  ;; applicable/needed), and manages the access graph. Assoc* takes a map of column/values
-  ;; and updates the record in the DB, and returns a new DBO representing the changed
-  ;; state.  Delete removes the record from the database."
+  ;;Simple accessor for DBObjects.  Field returns a column or relation object (loads if
+  ;;applicable/needed), and manages the access graph. Assoc* takes a map of column/values
+  ;;and updates the record in the DB, and returns a new DBO representing the changed
+  ;;state.  Delete removes the record from the database."
   (field  [#^DBObject dbobject column-name])
   (assoc* [#^DBObject dbobject new-columns])
   (delete [#^DBObject dbobject]))
 
-(defrecord DBObject [table-name primary-key columns]
-  ;;"DBOs are representations of data mappings from DB records, operations defined in IDBRecord."
+(defrecord DBObject
+  ;;DBOs are representations of data mappings from DB records, operations defined in IDBRecord.
+  [table-name primary-key columns]
   IDBRecord
   (field  [this column-name]
 	  (cond ;; Grab a single-relation field

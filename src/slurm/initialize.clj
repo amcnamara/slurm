@@ -20,7 +20,7 @@
   [schema-def & [fetch-graph]]
   (with-handler
     (let [db-schema          (try (read-string (str schema-def)) (catch Exception e (raise err/SchemaError e "Could not read schema definiton.")))
-	  db-host            (get db-schema :db-server-pool "localhost")
+	  db-host            (get db-schema :db-host "localhost")
 	  db-host            (if (string? db-host) db-host (first db-host)) ;; allow vector (multiple) or string (single) server defs
 	  db-port            (or (:db-port db-schema) 3306)
 	  db-root-subname    (str "//" db-host ":" db-port "/")
