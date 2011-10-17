@@ -1,4 +1,4 @@
-(defproject slurm "0.3.0"
+(defproject slurm "0.3.1"
   :description "A SQL ORM which uses a weighted object accessor graph to more efficiently load objects from the database"
   :dependencies     [[org.clojure/clojure         "1.2.0"]
                      [org.clojure/clojure-contrib "1.2.0"]

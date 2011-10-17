@@ -49,16 +49,14 @@
 	 sym-map# (accessor-map slurmdb#)
 	 sym-map# (into sym-map# {:field 'orm/field :assoc* 'orm/assoc* :delete 'orm/delete}) 
 	 binding# (bind-map sym-map#)]
-     (eval `(let* ~binding# (doall ~@'~body)))))
+     (eval `(let* ~binding# (do ~@'~body)))))
 
 ;; TODO: at some point add a REPL to allow playing with the DB through the CLI
 (defn -main
   "Command-line interface (used to initialize schemas only)"
   [& args]
   (let [schema-file (first args)]
-    (do
-      (if (nil? schema-file)
-	(println "Slurm command-line utility used to verify and initialize schema definition.\nUsage: java -jar slurm.jar <schema-filename>")
-	(let [orm (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e))))]
-	  (do
-	    (println "Database schema successfully initialized")))))))
+    (if (nil? schema-file)
+      (println "Slurm command-line utility used to verify and initialize schema definition.\nUsage: java -jar slurm.jar <schema-filename>")
+      (let [orm (init (try (slurp schema-file) (catch Exception e (println "Could not load schema file.\nTrace:" e))))]
+        (println "Database schema successfully initialized")))))
