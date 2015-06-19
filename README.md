@@ -1,7 +1,7 @@
 SLURM
 =====
 
-**Slurm is in ongoing development, and not yet ready for production.  However, I appreciate all feedback, ideas, and patches.**
+**Slurm is deprecated, and hasn't been updated to modern versions of Clojure. I'm leaving it up as a proof of concept for some neat (but not necessarily good) ideas.**
 
 Slurm is a Clojure ORM.  Its modelled more closely to a traditional OO ORM than a Clojure DSL, specifically to help beginners get off the ground.  It features the following:
 
