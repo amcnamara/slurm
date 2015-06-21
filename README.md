@@ -5,13 +5,11 @@ SLURM
 
 Slurm is a Clojure ORM.  Its modelled more closely to a traditional OO ORM than a Clojure DSL, specifically to help beginners get off the ground.  It features the following:
 
-* Selectable eager or lazy loading of database objects
-* Seamless single and multi object relations
-* Simple to define schemas, makes for easy adoption on existing projects/DBs
-* Simple interaction mechanisms.
-* Allows easy sequence processing of database records
-
-Slurm is in active development, please check back for updates often.  If you need any help or have feedback, you can ping me at alex.mcnamara@dreamux.com.
+* Eager or lazy loading of database objects
+* Single and multi object relations
+* Simple schemas, makes it easy to adapt existing projects/DBs
+* Simple interaction mechanisms
+* Process database records as sequences
 
 Overview
 --------
