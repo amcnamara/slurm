@@ -63,21 +63,25 @@ Interacting with your database is extremely easy and can all be done from within
 
     (defn my-program [my-db-schema]
       (with-orm my-db-schema
-        (let [new-employee (employee! { :name "Alex McNamara" })])))
+        (let [new-employee (employee! { :name "Alex McNamara", team: "Engineering" })])))
 
-This will create a new employee record in the database.  The object returned from this function is called a DBObject (DBO), and they're used to hold the state of a particular db row (in this case a `:employee` table's row, with the `:name` field value of "Alex McNamara").  Creating data is that easy, and one of these helpers will be bound for each table definition in the db-schema with via transformation of `:tablename` to `tablename!`, and accept a map of field:value pairs to persist a row.
+This will create a new employee record in the database.  The object returned from this function is called a DBObject (DBO), and they're used to hold the state of a particular db row (in this case a `:employee` table's row, with the `:name` field value of "Alex McNamara" and `:team` field value of Engineering).  Creating data is that easy, and one of these helpers will be bound for each table definition in the db-schema with via transformation of `:tablename` to `tablename!`, and accept a map of field:value pairs to persist a row.
 
-Queries are just as simple, their helpers would be defined in the above example as `(employee <primary-key>)`, or `(employee <field-name> <field-value>)`.  Genereally, the helpers follow the transformation of `:tablename` to `tablename`, and accept single, double, or variadic args as shown above.  An example, using the above code as reference would be:
+The DBO record's individual column fields can be inspected via the `field` operation:
 
-    (employee :name "Alex McNamara")
+    (field new-employee :name) ;; returns "Alex McNamara"
 
-This would grab a sequence of all employee records with the name "Alex McNamara", and return (at least) the one defined in the exercise above.  Passing a single argument to student would query on that table's primary key, so `(employee 13)` would grab the row with `:id` of `13`, and return the single DBO.
+Queries can be executed via the dynamically-injected `<table-name>` operation, the select helpers would be defined in the above example as `(employee <primary-key>)`, or `(employee <field-name> <field-value>)`.  Genereally, the helpers follow the transformation of `:tablename` to `tablename`, and accept single, double, or variadic args as shown above; building on the previous example:
 
-> **NOTE**: Primary key queries (single argument) return a singleton DBO, whereas variadic calls return collections of DBOs for matching results.
+    (let [ new-employee-team-members (employee :team (field new-employee :team)) ])
 
-The last two are more generic operations, `assoc*` takes a DBO and a map of field:value pairs and modifies the row in the database.  It returns a new DBO representing the changed state.  And `delete` takes a DBO and removes the row from the database.  Again, building on the examples from above we can mutate the `:name` field of the existing `new-employee` record and then delete that record entirely:
+This would grab a sequence of all employee records with the same `:team` field value as the `new-employee` DBO, and return (at least) the one defined in the exercise above.  Passing a single argument to `employee` would query on that table's primary key, so `(employee 13)` would grab the row with `:id` of `13`, and return the singleton DBO.
+
+Mutation can be accomplished via the `assoc*` operation, which takes a DBO and a map of a subset of the record's field:value pairs and modifies the corresponding row in the database.  It returns a new DBO representing the updated state of the record.  Building on the example above we can change the `:name` field of the existing `new-employee` record:
 
     (assoc* new-employee { :name "Alexander McNamara" })
+
+Lastly, the `delete` operatino takes a DBO and removes the corresponding row from the database:
 
     (delete new-employee)
 
