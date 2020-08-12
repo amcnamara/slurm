@@ -9,7 +9,7 @@ Slurm is a Clojure ORM.  Its modelled after a traditional Object-Oriented ORM bu
 * Records can be queried and processed as sequences, with eager- or lazy-loading
 * Records can be mapped with single and multi-object relations
 * Homoiconic schemas, easy to adapt to existing projects/DBs
-* Macro-based read/write functions which symbolically map to schema records
+* Macro-based read/write functions which symbolically map to schema tables
 
 
 Overview
@@ -49,7 +49,7 @@ Fields which represent standard SQL types may have the following field-types:
     "datetime"
     "blob"...
 
-> SEE: MySQL documentation for further details on supported native types.
+> **SEE**: MySQL documentation for further details on supported native types.
 
 A complete example of a schema definition can be found under `src/example/db_schema`, it may help clarify some of the naming conventions described here.  To see it in use launch the script under `src/example/db_example.clj` with the instructions given below.
 
@@ -73,7 +73,7 @@ Queries are just as simple, their helpers would be defined in the above example 
 
 This would grab a sequence of all employee records with the name "Alex McNamara", and return (at least) the one defined in the exercise above.  Passing a single argument to student would query on that table's primary key, so `(employee 13)` would grab the row with `:id` of `13`, and return the single DBO.
 
-> NOTE: Primary key queries (single argument) return a singleton DBO, whereas variadic calls return collections of DBOs for matching results.
+> **NOTE**: Primary key queries (single argument) return a singleton DBO, whereas variadic calls return collections of DBOs for matching results.
 
 The last two are more generic operations, `assoc*` takes a DBO and a map of field:value pairs and modifies the row in the database.  It returns a new DBO representing the changed state.  And `delete` takes a DBO and removes the row from the database.  Again, building on the examples from above we can change the `:name` field of the existing `new-employee` record and then delete that record entirely:
 
