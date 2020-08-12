@@ -1,16 +1,15 @@
-> DEPRECATION NOTICE: Slurm is no longer maintained, and hasn't been updated to modern versions of Clojure. This repository is a proof of concept for some interesting ideas, but these should not be considered idiomatic for either Clojure or MySQL.
+> **DEPRECATION NOTICE**: Slurm is no longer maintained, and hasn't been updated to modern versions of Clojure. This repository is a proof of concept for some interesting ideas, but these should not be considered idiomatic for either Clojure or MySQL.
 
 
 SLURM
 =====
 
-Slurm is a Clojure ORM.  Its modelled more closely to a traditional OO ORM than a Clojure DSL, and includes the following features:
+Slurm is a Clojure ORM.  Its modelled after a traditional Object-Oriented ORM but also includes a dynamic DSL for read/write operations.  It supports the following features:
 
-* Eager or lazy loading of database objects
-* Single and multi object relations
-* Simple schemas, makes it easy to adapt existing projects/DBs
-* Simple interaction mechanisms
-* Process database records as sequences
+* Records can be queried and processed as sequences, with eager- or lazy-loading
+* Records can be mapped with single and multi-object relations
+* Homoiconic schemas, easy to adapt to existing projects/DBs
+* Macro-based read/write functions which symbolically map to schema records
 
 
 Overview
@@ -76,13 +75,13 @@ This would grab a sequence of all employee records with the name "Alex McNamara"
 
 > NOTE: Primary key queries (single argument) return a singleton DBO, whereas variadic calls return collections of DBOs for matching results.
 
-The last two are more generic operations, `assoc*` takes a DBO and a map of field:value pairs and modifies the row in the database.  It returns a new DBO representing the changed state.  And `delete` takes a DBO and removes the row from the database.  Again, building on the examples from above:
+The last two are more generic operations, `assoc*` takes a DBO and a map of field:value pairs and modifies the row in the database.  It returns a new DBO representing the changed state.  And `delete` takes a DBO and removes the row from the database.  Again, building on the examples from above we can change the `:name` field of the existing `new-employee` record and then delete that record entirely:
 
     (assoc* new-employee {:name "Alexander McNamara"})
 
     (delete new-employee)
 
-That's it, these four operations should cover the _trivial_ use cases for dealing with DB records.  The current state of query support only enables PK and single conditional queries; intersection and union conditionals were never implemented.  Writes (especially for _related_ records) should not be considered atomic transactions, and thus not concurrently safe.  There are lots of notes in the code describing potential improvements as well as areas where the implementation compromised robustness in favor of a simplified object data interface.
+That's it, these four operations should cover the _trivial_ use cases for dealing with DB records.  The current state of query support only enables PK and single-conditional queries; intersection and union conditionals were never implemented.  Writes (especially for _related_ records) should not be considered atomic transactions, and thus not concurrently safe.  There are lots of notes in the code describing potential improvements as well as areas where the implementation compromised robustness in favor of a simplified object data interface.
 
 
 Examples
