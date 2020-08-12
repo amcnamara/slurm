@@ -17,37 +17,37 @@ Overview
 
 The first thing you need to do is define a schema for your DB; this includes credentials and connection information, as well as definitions of all tables and columns.  The schema is defined in a standard hash as follows:
 
-    {:db-host <ip-address>  (default: localhost)
-     :db-port <port-number> (default: 3306)
-     :db-user <username>    (default: root)
-     :db-pass <password>    (default: n/a)
-     :loading eager|lazy    (default: lazy)
-     :tables  #{<tables>}}
+    { :db-host  <ip-address>   (default: localhost)
+      :db-port  <port-number>  (default: 3306)
+      :db-user  <username>     (default: root)
+      :db-pass  <password>     (default: n/a)
+      :loading  eager|lazy     (default: lazy)
+      :tables   #{<tables>} }
 
 The root-level of the db-schema map concerns db credentials, the value of `:tables` is a collection of table definitions described as follows:
 
-    {:name                       <table-name>
-     :primary-key                <key-name>   (default: :id)
-     :primary-key-type           <type>       (default: "int(11)")
-     :primary-key-auto-increment true|false   (default: true)
-     :fields                     {<field-map}}
+    { :name                        <table-name>
+      :primary-key                 <key-name>      (default: :id)
+      :primary-key-type            <type>          (default: "int(11)")
+      :primary-key-auto-increment  true|false      (default: true)
+      :fields                      {<field-map} }
 
 Now that you've defined the table outlines, you need to fill in the fields that the table will hold, as follows:
 
-    {<field-name> <field-type>, ...}
+    { <field-name> <field-type>, ... }
 
-Note that all field names (and table names for that matter) should be keywordized.  Field types can either be SQL primatives (described below), or references to other tables.  Single references (ie. the field will point to at most a single row in the foreign table) are defined by putting the keword table-name of the table being referenced into the field-type value.  Muli reference fields (ie. one which contains reference to many rows of a different table) are defined with the keyword table-name prefixed with an asterisk, so a field called :enrolled_students with a multi relation to a table named :student may be defined as follows:
+Note that all field names (and table names) should be keywordized.  Field types can either be SQL primatives (described below), or references to other tables.  Single-reference fields (ie. the field will point to at most a single row in the foreign table) are defined by putting the keyword table name of the relational table into the `field-type` value.  Multi-reference fields (ie. one which contains reference to many rows of a foreign table) are defined with the keyword table name prefixed with an asterisk, so a field called `:enrolled_students` with a multi-record relation to a table named `:student` may be defined as follows:
 
-    {:enrolled_students :*student, ...}
+    { :enrolled_students :*student, ... }
 
-Fields which represent standard SQL types may have the following field-types:
+Fields which represent standard SQL types may have the following `field-types`:
 
     "int(n)"
     "varchar(n)"
     "bool"
     "date"
     "datetime"
-    "blob"...
+    "blob"
 
 > **SEE**: MySQL documentation for further details on supported native types.
 
@@ -63,7 +63,7 @@ Interacting with your database is extremely easy and can all be done from within
 
     (defn my-program [my-db-schema]
       (with-orm my-db-schema
-        (let [new-employee (employee! {:name "Alex McNamara"})])))
+        (let [new-employee (employee! { :name "Alex McNamara" })])))
 
 This will create a new employee record in the database.  The object returned from this function is called a DBObject (DBO), and they're used to hold the state of a particular db row (in this case a `:employee` table's row, with the `:name` field value of "Alex McNamara").  Creating data is that easy, and one of these helpers will be bound for each table definition in the db-schema with via transformation of `:tablename` to `tablename!`, and accept a map of field:value pairs to persist a row.
 
@@ -75,9 +75,9 @@ This would grab a sequence of all employee records with the name "Alex McNamara"
 
 > **NOTE**: Primary key queries (single argument) return a singleton DBO, whereas variadic calls return collections of DBOs for matching results.
 
-The last two are more generic operations, `assoc*` takes a DBO and a map of field:value pairs and modifies the row in the database.  It returns a new DBO representing the changed state.  And `delete` takes a DBO and removes the row from the database.  Again, building on the examples from above we can change the `:name` field of the existing `new-employee` record and then delete that record entirely:
+The last two are more generic operations, `assoc*` takes a DBO and a map of field:value pairs and modifies the row in the database.  It returns a new DBO representing the changed state.  And `delete` takes a DBO and removes the row from the database.  Again, building on the examples from above we can mutate the `:name` field of the existing `new-employee` record and then delete that record entirely:
 
-    (assoc* new-employee {:name "Alexander McNamara"})
+    (assoc* new-employee { :name "Alexander McNamara" })
 
     (delete new-employee)
 
